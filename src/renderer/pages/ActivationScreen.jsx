@@ -23,24 +23,35 @@ export default function ActivationScreen({ onActivated, expiredPlan }) {
   }, [])
 
   async function handleActivate() {
-    if (!key.trim()) { setError('Please enter your license key'); return }
-    setLoading(true)
-    setError('')
+  if (!key.trim()) { setError('Please enter your license key'); return }
+  setLoading(true)
+  setError('')
 
-    try {
-      const result = await window.api.license.activate(key.trim())
-      if (result.success) {
-        setSuccess(result.license)
-        setTimeout(() => onActivated(result.license), 1800)
-      } else {
-        setError(result.error || 'Invalid license key.')
-      }
-    } catch {
-      setError('Cannot connect to license server. Check your internet connection.')
-    } finally {
-      setLoading(false)
+  try {
+    const hardwareId = await window.api.license.getHardwareId()
+    const response = await fetch('https://mailflow-license-server-production.up.railway.app/api/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        licenseKey: key.trim().toUpperCase(),
+        hardwareId,
+        machineName: 'windows'
+      })
+    })
+    const result = await response.json()
+    if (result.success) {
+      await window.api.license.saveActivation(key.trim().toUpperCase(), result.license, hardwareId)
+      setSuccess(result.license)
+      setTimeout(() => onActivated(result.license), 1800)
+    } else {
+      setError(result.error || 'Invalid license key.')
     }
+  } catch (err) {
+    setError('Connection failed: ' + err.message)
+  } finally {
+    setLoading(false)
   }
+}
 
   function handleKeyChange(e) {
     setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))

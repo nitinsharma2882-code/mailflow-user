@@ -1,14 +1,13 @@
-const { app, ipcMain } = require('electron')
+const { app, ipcMain, net } = require('electron')
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 const crypto = require('crypto')
 const os     = require('os')
 const path   = require('path')
 const fs     = require('fs')
 
-// ── CONFIG — set this to your Railway URL after deploying ─────────
-const LICENSE_SERVER = process.env.LICENSE_SERVER_URL || 'mailflow-license-server-production.up.railway.app'
+const LICENSE_SERVER = process.env.LICENSE_SERVER_URL || 'https://mailflow-license-server-production.up.railway.app'
 const LICENSE_FILE   = path.join(app ? app.getPath('userData') : '.', 'license.dat')
 
-// ── Hardware fingerprint ─────────────────────────────────────────
 function getHardwareId() {
   const data = [
     os.hostname(),
@@ -20,7 +19,6 @@ function getHardwareId() {
   return crypto.createHash('sha256').update(data).digest('hex').substring(0, 32)
 }
 
-// ── Local encrypted storage ──────────────────────────────────────
 const ENCRYPT_KEY = crypto.createHash('sha256')
   .update('mailflow-license-encryption-key-2026')
   .digest()
@@ -59,48 +57,49 @@ function clearLicense() {
   try { fs.unlinkSync(LICENSE_FILE) } catch {}
 }
 
-// ── HTTP helper ──────────────────────────────────────────────────
 function httpPost(endpoint, body) {
   return new Promise((resolve, reject) => {
-    const https = require('https')
-    const http  = require('http')
-    const url   = new URL(`${LICENSE_SERVER}${endpoint}`)
-    const data  = JSON.stringify(body)
-    const lib   = url.protocol === 'https:' ? https : http
+    const url = `${LICENSE_SERVER}${endpoint}`
+    const data = JSON.stringify(body)
 
-    const req = lib.request({
-      hostname: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? 443 : 80),
-      path: url.pathname,
+    const request = net.request({
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
-      },
-      timeout: 10000
-    }, (res) => {
-      let body = ''
-      res.on('data', c => { body += c })
-      res.on('end', () => {
-        try { resolve(JSON.parse(body)) }
-        catch { reject(new Error('Invalid server response')) }
+      url: url,
+    })
+
+    request.setHeader('Content-Type', 'application/json')
+    request.setHeader('Content-Length', Buffer.byteLength(data))
+
+    let responseBody = ''
+
+    request.on('response', (response) => {
+      response.on('data', (chunk) => {
+        responseBody += chunk.toString()
+      })
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(responseBody))
+        } catch (e) {
+          reject(new Error('Invalid server response: ' + responseBody))
+        }
       })
     })
-    req.on('error', reject)
-    req.on('timeout', () => reject(new Error('Timeout')))
-    req.write(data)
-    req.end()
+
+    request.on('error', (err) => {
+      reject(new Error('Network error: ' + err.message))
+    })
+
+    request.write(data)
+    request.end()
   })
 }
 
-// ── Check license (called on every startup) ──────────────────────
 async function checkLicense() {
   const hardwareId = getHardwareId()
   const local      = loadLicense()
 
   if (!local?.key) return { valid: false, reason: 'no_license' }
 
-  // First check local expiry (fast path, no network needed)
   if (local.expiresAt && new Date(local.expiresAt) < new Date()) {
     clearLicense()
     return {
@@ -111,51 +110,31 @@ async function checkLicense() {
     }
   }
 
-  // Online verification
   try {
     const result = await httpPost('/api/verify', { licenseKey: local.key, hardwareId })
-
     if (result.success) {
-      // Refresh local cache
-      saveLicense({
-        ...local,
-        ...result.license,
-        lastVerified: new Date().toISOString()
-      })
+      saveLicense({ ...local, ...result.license, lastVerified: new Date().toISOString() })
       return { valid: true, license: result.license }
     } else {
-      // Server says invalid/expired — clear and lock
-      if (result.expired) {
-        clearLicense()
-        return { valid: false, reason: 'expired', error: result.error }
-      }
+      if (result.expired) { clearLicense(); return { valid: false, reason: 'expired', error: result.error } }
       clearLicense()
       return { valid: false, reason: 'invalid', error: result.error }
     }
-  } catch {
-    // Offline fallback — allow up to 24 hours without verification
+  } catch (err) {
     if (local.lastVerified) {
       const hoursSince = (Date.now() - new Date(local.lastVerified).getTime()) / (1000 * 60 * 60)
-      if (hoursSince <= 24) {
-        return { valid: true, license: local, offline: true }
-      }
+      if (hoursSince <= 24) return { valid: true, license: local, offline: true }
     }
-    return {
-      valid: false,
-      reason: 'offline',
-      error: 'Cannot verify license. Please connect to the internet.'
-    }
+    return { valid: false, reason: 'offline', error: 'Cannot verify license. Error: ' + err.message }
   }
 }
 
-// ── Activate new key ─────────────────────────────────────────────
 async function activateLicense(licenseKey) {
   const hardwareId  = getHardwareId()
   const machineName = os.hostname()
 
   try {
     const result = await httpPost('/api/activate', { licenseKey, hardwareId, machineName })
-
     if (result.success) {
       saveLicense({
         key: licenseKey.trim().toUpperCase(),
@@ -166,18 +145,21 @@ async function activateLicense(licenseKey) {
       return { success: true, license: result.license }
     }
     return { success: false, error: result.error }
-  } catch {
-    return { success: false, error: 'Cannot connect to license server. Check your internet.' }
+  } catch (err) {
+    return { success: false, error: 'Connection failed: ' + err.message }
   }
 }
 
-// ── IPC handlers ─────────────────────────────────────────────────
 function registerLicenseHandlers() {
   ipcMain.handle('license:check',         () => checkLicense())
   ipcMain.handle('license:activate',      (_, key) => activateLicense(key))
   ipcMain.handle('license:clear',         () => { clearLicense(); return { success: true } })
   ipcMain.handle('license:getInfo',       () => loadLicense())
   ipcMain.handle('license:getHardwareId', () => getHardwareId())
+  ipcMain.handle('license:saveActivation', (_, key, license, hardwareId) => {
+    saveLicense({ key, ...license, hardwareId, lastVerified: new Date().toISOString() })
+    return { success: true }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId }
