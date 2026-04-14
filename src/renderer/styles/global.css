@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--txt);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bdr2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--txt4); }
+
+/* Selection */
+::selection { background: var(--pu-l); color: var(--pu-d); }
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--pu);
+  outline-offset: 2px;
+  border-radius: var(--rad);
+}
+
+/* Links */
+a { color: var(--pu); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Inputs */
+input, select, textarea, button {
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+/* Remove input arrows for number */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+/* Drag region for Electron titlebar */
+.drag-region { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* Transitions */
+* { transition-property: none; }
+.animated { transition-property: all; transition-duration: .12s; }

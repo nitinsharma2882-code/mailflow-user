@@ -1,0 +1,210 @@
+/* ── Badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.badge-default  { background: var(--bg3); color: var(--txt2); }
+.badge-default::before { background: var(--txt3); }
+.badge-sent     { background: var(--gr-l); color: var(--gr); }
+.badge-sent::before { background: var(--gr); }
+.badge-running  { background: var(--pu-l); color: var(--pu); }
+.badge-running::before { background: var(--pu); animation: pulse 1.5s infinite; }
+.badge-draft    { background: var(--bg3); color: var(--txt2); }
+.badge-draft::before { background: var(--txt3); }
+.badge-scheduled{ background: var(--am-l); color: var(--am); }
+.badge-scheduled::before { background: var(--am); }
+.badge-paused   { background: var(--am-l); color: var(--am); }
+.badge-paused::before { background: var(--am); }
+.badge-cancelled{ background: var(--re-l); color: var(--re); }
+.badge-cancelled::before { background: var(--re); }
+.badge-valid    { background: var(--gr-l); color: var(--gr); }
+.badge-valid::before { background: var(--gr); }
+.badge-invalid  { background: var(--re-l); color: var(--re); }
+.badge-invalid::before { background: var(--re); }
+.badge-risky    { background: var(--am-l); color: var(--am); }
+.badge-risky::before { background: var(--am); }
+.badge-active   { background: var(--gr-l); color: var(--gr); }
+.badge-active::before { background: var(--gr); }
+.badge-error    { background: var(--re-l); color: var(--re); }
+.badge-error::before { background: var(--re); }
+.badge-limited  { background: var(--am-l); color: var(--am); }
+.badge-limited::before { background: var(--am); }
+.badge-untested { background: var(--bg3); color: var(--txt2); }
+.badge-untested::before { background: var(--txt3); }
+.badge-smtp     { background: #EDF4FF; color: #1A56DB; }
+.badge-smtp::before { background: #1A56DB; }
+.badge-api      { background: var(--pu-l); color: var(--pu); }
+.badge-api::before { background: var(--pu); }
+.badge-working  { background: var(--gr-l); color: var(--gr); }
+.badge-working::before { background: var(--gr); }
+.badge-failed   { background: var(--re-l); color: var(--re); }
+.badge-failed::before { background: var(--re); }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+/* ── Stat Card ── */
+.statCard {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rad-l);
+  padding: 16px 18px;
+}
+.statLabel { font-size: 12px; color: var(--txt2); font-weight: 500; margin-bottom: 6px; }
+.statValue { font-size: 26px; font-weight: 600; letter-spacing: -0.5px; line-height: 1; }
+.statDelta { font-size: 12px; margin-top: 5px; font-weight: 500; }
+.up   { color: var(--gr); }
+.down { color: var(--re); }
+.neutral { color: var(--txt3); }
+.warn { color: var(--am); }
+
+/* ── Progress ── */
+.progTrack {
+  background: var(--bg3);
+  border-radius: 99px;
+  height: 5px;
+  width: 88px;
+  overflow: hidden;
+}
+.progFill { height: 5px; border-radius: 99px; transition: width 0.3s; }
+.prog-purple { background: var(--pu); }
+.prog-green  { background: var(--tl); }
+.prog-red    { background: var(--re); }
+.prog-amber  { background: var(--am); }
+
+/* ── Section Header ── */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.sectionTitle { font-size: 14px; font-weight: 600; }
+.sectionActions { display: flex; align-items: center; gap: 8px; }
+
+/* ── Card ── */
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rad-l);
+}
+.cardPadded { padding: 18px; }
+
+/* ── Table ── */
+.tableWrap {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rad-l);
+  overflow: hidden;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  padding: 9px 16px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--txt2);
+  border-bottom: 1px solid var(--bdr);
+  background: var(--bg3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--bdr);
+  color: var(--txt);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover td { background: #FAFAFA; }
+.emptyState {
+  padding: 48px;
+  text-align: center;
+  color: var(--txt3);
+  font-size: 13px;
+}
+
+/* ── Form ── */
+.formField { display: flex; flex-direction: column; gap: 5px; }
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt2);
+  letter-spacing: 0.2px;
+}
+.input {
+  padding: 8px 11px;
+  border: 1px solid var(--bdr2);
+  border-radius: var(--rad);
+  font-size: 13px;
+  background: var(--bg2);
+  color: var(--txt);
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  width: 100%;
+}
+.input:focus {
+  border-color: var(--pu);
+  box-shadow: 0 0 0 3px rgba(74,58,255,.1);
+}
+.textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
+.inputError { border-color: var(--re) !important; }
+.fieldError { font-size: 12px; color: var(--re); }
+
+/* ── Divider ── */
+.divider { border: none; border-top: 1px solid var(--bdr); margin: 16px 0; }
+
+/* ── Empty full ── */
+.emptyFull {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 32px;
+  color: var(--txt3);
+}
+.emptyIcon { font-size: 40px; margin-bottom: 16px; opacity: 0.35; }
+.emptyTitle { font-size: 15px; font-weight: 600; color: var(--txt2); margin-bottom: 6px; }
+.emptyDesc { font-size: 13px; max-width: 320px; line-height: 1.5; }
+
+/* ── Gauge ── */
+.gaugeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.gaugeLabel { width: 90px; flex-shrink: 0; color: var(--txt2); }
+.gaugeTrack { flex: 1; height: 5px; background: var(--bg3); border-radius: 99px; overflow: hidden; }
+.gaugeFill  { height: 100%; border-radius: 99px; transition: width 0.3s; }
+.gaugeVal   { min-width: 32px; text-align: right; font-weight: 500; color: var(--txt2); font-size: 11px; }
+
+/* ── Spinner ── */
+.spinnerWrap { display: flex; align-items: center; justify-content: center; padding: 40px; }
+.bigSpinner {
+  border: 2px solid var(--bdr2);
+  border-top-color: var(--pu);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

@@ -1,0 +1,152 @@
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--bg2);
+  border-right: 1px solid var(--bdr);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.logo {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--bdr);
+  min-height: var(--topbar-h);
+}
+
+.logoMark {
+  width: 30px;
+  height: 30px;
+  background: var(--pu);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.logoName {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.logoTag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--pu-l);
+  color: var(--pu);
+  padding: 2px 7px;
+  border-radius: 20px;
+  letter-spacing: 0.2px;
+}
+
+.nav {
+  flex: 1;
+  padding: 10px 8px;
+  overflow-y: auto;
+}
+
+.group {
+  margin-bottom: 4px;
+}
+
+.groupLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--txt3);
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  padding: 10px 10px 4px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--rad);
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--txt2);
+  font-size: 13.5px;
+  font-weight: 400;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.navItem:hover {
+  background: var(--bg3);
+  color: var(--txt);
+}
+
+.navItem.active {
+  background: var(--pu-l);
+  color: var(--pu);
+  font-weight: 500;
+}
+
+.navItem svg {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.navItem.active svg {
+  opacity: 1;
+}
+
+.badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--pu);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 20px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.footer {
+  padding: 10px 8px;
+  border-top: 1px solid var(--bdr);
+}
+
+.userRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--rad);
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--pu-l);
+  color: var(--pu);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.userName {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.userEmail {
+  font-size: 11px;
+  color: var(--txt3);
+  margin-top: 1px;
+}
