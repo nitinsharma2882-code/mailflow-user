@@ -5,7 +5,7 @@ const path   = require('path')
 const fs     = require('fs')
 
 // ── CONFIG — set this to your Railway URL after deploying ─────────
-const LICENSE_SERVER = process.env.LICENSE_SERVER_URL || 'https://your-license-server.railway.app'
+const LICENSE_SERVER = process.env.LICENSE_SERVER_URL || 'mailflow-license-server-production.up.railway.app'
 const LICENSE_FILE   = path.join(app ? app.getPath('userData') : '.', 'license.dat')
 
 // ── Hardware fingerprint ─────────────────────────────────────────
