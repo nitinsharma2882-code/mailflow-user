@@ -2,6 +2,7 @@ const { ipcMain, BrowserWindow } = require('electron')
 const { v4: uuid } = require('uuid')
 const nodemailer = require('nodemailer')
 const db = require('../../database/db')
+const { getSmtpConfig } = require('./customSmtp')
 
 // In-memory queue state per campaign
 const runningCampaigns = new Map()
@@ -44,7 +45,7 @@ function registerSendingHandlers() {
     return { success: true }
   })
 
-  ipcMain.handle('sending:test', async (_, { campaignId, testEmails, serverId }) => {
+  ipcMain.handle('sending:test', async (_, { campaignId, testEmails, serverId, customSmtpAccount }) => {
     const database = db.get()
     const campaign = database.prepare(`
       SELECT c.*, t.html_body, t.subject, t.from_name
@@ -53,8 +54,17 @@ function registerSendingHandlers() {
       WHERE c.id = ?
     `).get(campaignId)
 
-    const server = database.prepare('SELECT * FROM servers WHERE id = ?').get(serverId)
-    if (!server || !campaign) return { success: false, error: 'Missing data' }
+    if (!campaign) return { success: false, error: 'Campaign not found' }
+
+    let server = null
+    if (customSmtpAccount) {
+      // Use custom SMTP for test
+      server = buildCustomSmtpServer(customSmtpAccount)
+    } else {
+      server = database.prepare('SELECT * FROM servers WHERE id = ?').get(serverId)
+    }
+
+    if (!server) return { success: false, error: 'No server available' }
 
     const results = []
     for (const email of testEmails) {
@@ -83,10 +93,10 @@ function registerSendingHandlers() {
     const map = {}
     stats.forEach(s => { map[s.status] = s.count })
     return {
-      pending: map.pending || 0,
-      sending: map.sending || 0,
-      sent: map.sent || 0,
-      failed: map.failed || 0,
+      pending:  map.pending  || 0,
+      sending:  map.sending  || 0,
+      sent:     map.sent     || 0,
+      failed:   map.failed   || 0,
       retrying: map.retrying || 0,
       total: Object.values(map).reduce((a, b) => a + b, 0)
     }
@@ -125,6 +135,21 @@ function registerSendingHandlers() {
   })
 }
 
+// Build a server object from a custom SMTP account
+function buildCustomSmtpServer(account) {
+  const config = getSmtpConfig(account.email)
+  return {
+    type: 'smtp',
+    host: config?.host || `smtp.${account.email.split('@')[1]}`,
+    port: config?.port || 587,
+    encryption: config?.encryption || 'tls',
+    email: account.email,
+    from_email: account.email,
+    password: account.app_password,
+    name: account.email,
+  }
+}
+
 async function startCampaign(campaignId) {
   const database = db.get()
 
@@ -144,11 +169,26 @@ async function startCampaign(campaignId) {
 
   if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
 
-  // Get servers
-  const serverIds = JSON.parse(campaign.server_ids || '[]')
-  const servers = serverIds.length > 0
-    ? database.prepare(`SELECT * FROM servers WHERE id IN (${serverIds.map(() => '?').join(',')}) AND status = 'active'`).all(...serverIds)
-    : database.prepare(`SELECT * FROM servers WHERE status = 'active'`).all()
+  let servers = []
+
+  // Check if custom SMTP mode
+  const sending_mode = campaign.sending_mode || 'existing_server'
+  const customSmtpList = campaign.custom_smtp_list
+    ? JSON.parse(campaign.custom_smtp_list)
+    : []
+
+  if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+    // Build server objects from custom SMTP accounts
+    servers = customSmtpList
+      .filter(a => a.working !== false)
+      .map(a => buildCustomSmtpServer(a))
+  } else {
+    // Use existing configured servers
+    const serverIds = JSON.parse(campaign.server_ids || '[]')
+    servers = serverIds.length > 0
+      ? database.prepare(`SELECT * FROM servers WHERE id IN (${serverIds.map(() => '?').join(',')}) AND status = 'active'`).all(...serverIds)
+      : database.prepare(`SELECT * FROM servers WHERE status = 'active'`).all()
+  }
 
   if (servers.length === 0) return { success: false, error: 'No active servers available' }
 
@@ -191,7 +231,7 @@ async function startCampaign(campaignId) {
 
 async function processBatch(campaignId) {
   const BATCH_SIZE = 50
-  const DELAY_MS = 200  // between emails
+  const DELAY_MS   = 200
 
   const state = runningCampaigns.get(campaignId)
   if (!state) return
@@ -200,9 +240,8 @@ async function processBatch(campaignId) {
 
   while (true) {
     if (state.cancelled) break
-    if (state.paused) return  // will resume from resume handler
+    if (state.paused) return
 
-    // Get next batch of pending jobs
     const jobs = database.prepare(`
       SELECT j.*, c.name, c.custom_fields
       FROM email_jobs j
@@ -213,7 +252,6 @@ async function processBatch(campaignId) {
     `).all(campaignId, BATCH_SIZE)
 
     if (jobs.length === 0) {
-      // Check if all done
       const remaining = database.prepare(`
         SELECT COUNT(*) as cnt FROM email_jobs
         WHERE campaign_id = ? AND status NOT IN ('sent','failed')
@@ -223,7 +261,6 @@ async function processBatch(campaignId) {
         finalizeCampaign(campaignId)
         break
       }
-      // Wait and retry (for retrying jobs)
       await sleep(5000)
       continue
     }
@@ -235,21 +272,20 @@ async function processBatch(campaignId) {
       const server = state.servers[state.serverIndex % state.servers.length]
       state.serverIndex++
 
-      // Mark as sending
       database.prepare(`UPDATE email_jobs SET status = 'sending', server_id = ? WHERE id = ?`)
-        .run(server.id, job.id)
+        .run(server.id || server.email, job.id)
 
       try {
         const customFields = JSON.parse(job.custom_fields || '{}')
         const mergedHtml = mergeTemplate(state.campaign.html_body, {
-          name: job.name || job.email.split('@')[0],
+          name:  job.name || job.email.split('@')[0],
           email: job.email,
           ...customFields
         })
 
         await deliverEmail(server, {
-          to: job.email,
-          from: `${state.campaign.from_name || 'Mailflow'} <${server.from_email || server.email}>`,
+          to:      job.email,
+          from:    `${state.campaign.from_name || 'Mailflow'} <${server.from_email || server.email}>`,
           subject: mergeTemplate(state.campaign.subject, {
             name: job.name || '', email: job.email, ...customFields
           }),
@@ -257,7 +293,6 @@ async function processBatch(campaignId) {
           text: state.campaign.text_body || '',
         })
 
-        // Success
         database.prepare(`
           UPDATE email_jobs SET status = 'sent', sent_at = datetime('now') WHERE id = ?
         `).run(job.id)
@@ -267,12 +302,13 @@ async function processBatch(campaignId) {
           WHERE id = ?
         `).run(campaignId)
 
-        database.prepare(`
-          UPDATE servers SET sent_today = sent_today + 1 WHERE id = ?
-        `).run(server.id)
+        // Only update sent_today for DB servers (not custom SMTP)
+        if (server.id) {
+          database.prepare(`UPDATE servers SET sent_today = sent_today + 1 WHERE id = ?`).run(server.id)
+        }
 
       } catch (err) {
-        const attempts = job.attempts + 1
+        const attempts    = job.attempts + 1
         const maxAttempts = job.max_attempts || 3
 
         if (attempts >= maxAttempts) {
@@ -284,7 +320,6 @@ async function processBatch(campaignId) {
             UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ?
           `).run(campaignId)
         } else {
-          // Schedule retry on SAME server (60s delay)
           const retryAt = new Date(Date.now() + 60000).toISOString()
           database.prepare(`
             UPDATE email_jobs SET
@@ -295,7 +330,6 @@ async function processBatch(campaignId) {
         }
       }
 
-      // Emit progress to renderer
       emitProgress(campaignId)
       await sleep(DELAY_MS)
     }
@@ -312,7 +346,6 @@ function finalizeCampaign(campaignId) {
 
   runningCampaigns.delete(campaignId)
 
-  // Notify renderer
   const wins = BrowserWindow.getAllWindows()
   wins.forEach(w => w.webContents.send('campaign:statusChange', campaignId, 'sent'))
 }
@@ -330,10 +363,13 @@ function emitProgress(campaignId) {
 async function deliverEmail(server, mailOptions) {
   if (server.type === 'smtp') {
     const transporter = nodemailer.createTransport({
-      host: server.host,
-      port: parseInt(server.port),
-      secure: server.encryption === 'ssl',
-      auth: { user: server.email, pass: server.password },
+      host:    server.host,
+      port:    parseInt(server.port),
+      secure:  server.encryption === 'ssl',
+      requireTLS: server.encryption === 'tls',
+      auth:    { user: server.email, pass: server.password },
+      connectionTimeout: 10000,
+      socketTimeout: 10000,
     })
     return transporter.sendMail(mailOptions)
   }
@@ -346,7 +382,8 @@ async function deliverEmail(server, mailOptions) {
     }
     if (server.provider === 'ses') {
       const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses')
-      const client = new SESClient({ region: server.region || 'us-east-1',
+      const client = new SESClient({
+        region: server.region || 'us-east-1',
         credentials: { accessKeyId: server.api_key, secretAccessKey: server.password }
       })
       return client.send(new SendEmailCommand({
@@ -360,9 +397,9 @@ async function deliverEmail(server, mailOptions) {
     }
     if (server.provider === 'mailgun') {
       const formData = require('form-data')
-      const Mailgun = require('mailgun.js')
-      const mg = new Mailgun(formData)
-      const client = mg.client({ username: 'api', key: server.api_key })
+      const Mailgun  = require('mailgun.js')
+      const mg       = new Mailgun(formData)
+      const client   = mg.client({ username: 'api', key: server.api_key })
       return client.messages.create(server.region || 'mailgun.org', {
         from: mailOptions.from, to: mailOptions.to,
         subject: mailOptions.subject, html: mailOptions.html

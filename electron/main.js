@@ -10,11 +10,12 @@ const { registerSendingHandlers }   = require('./ipc/sending')
 const { registerVerifyHandlers }    = require('./ipc/verify')
 const { registerSmtpHandlers }      = require('./ipc/smtp')
 const { registerAnalyticsHandlers } = require('./ipc/analytics')
+const { registerCustomSmtpHandlers } = require('./ipc/customSmtp')
 const { registerLicenseHandlers, checkLicense } = require('./license')
 const db = require('../database/db')
 
 let mainWindow
-let licenseValid = isDev
+let licenseValid = isDev // skip check in dev mode
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -22,6 +23,7 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 680,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -29,18 +31,6 @@ function createWindow() {
     },
     show: false,
     title: 'Mailflow'
-  })
-
-  // Allow fetch to license server
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self'; connect-src 'self' https://mailflow-license-server-production.up.railway.app https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:"
-        ]
-      }
-    })
   })
 
   if (isDev) {
@@ -71,6 +61,7 @@ app.whenReady().then(async () => {
   registerVerifyHandlers()
   registerSmtpHandlers()
   registerAnalyticsHandlers()
+  registerCustomSmtpHandlers()
   registerLicenseHandlers()
 
   ipcMain.handle('dialog:openFile', async (_, options) => {

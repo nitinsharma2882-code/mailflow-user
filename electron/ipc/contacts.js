@@ -1,10 +1,45 @@
 const { ipcMain } = require('electron')
 const { v4: uuid } = require('uuid')
-const fs = require('fs')
+const fs   = require('fs')
 const path = require('path')
-const csv = require('csv-parser')
+const csv  = require('csv-parser')
 const XLSX = require('xlsx')
-const db = require('../../database/db')
+const db   = require('../../database/db')
+
+// Standard field mapping — maps common column names to our standard fields
+function mapFields(row) {
+  const keys = Object.keys(row)
+  const vals = Object.values(row)
+
+  // Email — always required
+  const email =
+    row.email || row.Email || row.EMAIL || row['e-mail'] || row['E-Mail'] ||
+    row['Email Address'] || row['email address'] || vals[0] || ''
+
+  // Name — 2nd priority field
+  const name =
+    row.name || row.Name || row.NAME || row['Full Name'] || row['full name'] ||
+    row.fullname || row.customer || row.Customer || row.contact || vals[1] || ''
+
+  // Address — 3rd priority field
+  const address =
+    row.address || row.Address || row.ADDRESS ||
+    row['Shipping address 1'] || row['shipping_address'] ||
+    row.city || row.City || row.location || row.Location || vals[2] || ''
+
+  // Custom field — 4th priority field
+  const custom_field =
+    row.custom_field || row.custom || row.Custom || row.tag || row.Tag ||
+    row.note || row.Note || row.type || row.Type || row.category ||
+    row.plan || row.Plan || vals[3] || ''
+
+  return {
+    email:        typeof email === 'object'        ? JSON.stringify(email)        : String(email || '').trim().toLowerCase(),
+    name:         typeof name === 'object'         ? JSON.stringify(name)         : String(name || '').trim(),
+    address:      typeof address === 'object'      ? JSON.stringify(address)      : String(address || '').trim(),
+    custom_field: typeof custom_field === 'object' ? JSON.stringify(custom_field) : String(custom_field || '').trim(),
+  }
+}
 
 function registerContactHandlers() {
 
@@ -15,50 +50,56 @@ function registerContactHandlers() {
   })
 
   ipcMain.handle('contacts:getList', (_, id) => {
-    const list = db.get().prepare('SELECT * FROM contact_lists WHERE id = ?').get(id)
-    return list
+    return db.get().prepare('SELECT * FROM contact_lists WHERE id = ?').get(id)
   })
 
-  ipcMain.handle('contacts:getPreview', (_, listId, limit = 20) => {
+  // Return ALL contacts (no limit) for display
+  ipcMain.handle('contacts:getPreview', (_, listId, limit = 999999) => {
     return db.get().prepare(`
-      SELECT * FROM contacts WHERE list_id = ? LIMIT ?
-    `).all(listId, limit)
+      SELECT id, email, name, status, custom_fields FROM contacts
+      WHERE list_id = ? LIMIT ?
+    `).all(listId, limit).map(c => {
+      let cf = {}
+      try { cf = JSON.parse(c.custom_fields || '{}') } catch {}
+      return {
+        email:        c.email,
+        name:         c.name || cf.name || '',
+        address:      cf.address || cf.Address || '',
+        custom_field: cf.custom_field || cf.custom || cf.tag || '',
+        status:       c.status,
+      }
+    })
   })
 
   ipcMain.handle('contacts:importCSV', async (_, filePath, listName) => {
     return new Promise((resolve, reject) => {
       const database = db.get()
-      const listId = uuid()
-      const ext = path.extname(filePath).toLowerCase()
-      let rows = []
+      const listId   = uuid()
+      const ext      = path.extname(filePath).toLowerCase()
 
       const processRows = (rawRows) => {
         const contacts = []
         let valid = 0, invalid = 0
 
         for (const row of rawRows) {
-          // Detect email field
-          const email = row.email || row.Email || row.EMAIL ||
-            row['e-mail'] || row['E-Mail'] || Object.values(row)[0]
+          const mapped  = mapFields(row)
+          const email   = mapped.email
+          if (!email || !email.includes('@')) continue
 
-          if (!email) continue
-
-          const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-          const status = isValid ? 'valid' : 'invalid'
+          const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+          const status  = isValid ? 'valid' : 'invalid'
           if (isValid) valid++; else invalid++
 
-          // Extract known fields, put rest in custom_fields
-          const { email: _e, Email: _E, name, Name, ...rest } = row
-          const customFields = {}
-          for (const [k, v] of Object.entries(rest)) {
-            if (v && k.toLowerCase() !== 'email') customFields[k] = v
+          const customFields = {
+            address:      mapped.address,
+            custom_field: mapped.custom_field,
           }
 
           contacts.push({
-            id: uuid(),
-            list_id: listId,
-            email: email.trim().toLowerCase(),
-            name: name || Name || null,
+            id:            uuid(),
+            list_id:       listId,
+            email,
+            name:          mapped.name || null,
             status,
             custom_fields: JSON.stringify(customFields)
           })
@@ -70,7 +111,7 @@ function registerContactHandlers() {
           VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
         `).run(listId, listName, contacts.length, valid, invalid)
 
-        // Bulk insert contacts in a transaction
+        // Bulk insert
         const insertContact = database.prepare(`
           INSERT INTO contacts (id, list_id, email, name, status, custom_fields, created_at)
           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
@@ -82,20 +123,23 @@ function registerContactHandlers() {
         })
         insertMany(contacts)
 
-        // Detect custom field names
-        const fieldNames = contacts.length > 0
-          ? Object.keys(JSON.parse(contacts[0].custom_fields))
-          : []
+        // Return ALL contacts for display
+        const preview = contacts.map(c => {
+          const cf = JSON.parse(c.custom_fields || '{}')
+          return {
+            email:        c.email,
+            name:         c.name || '',
+            address:      cf.address || '',
+            custom_field: cf.custom_field || '',
+            status:       c.status,
+          }
+        })
 
         resolve({
           listId, listName,
           total: contacts.length,
           valid, invalid,
-          fieldNames,
-          preview: contacts.slice(0, 5).map(c => ({
-            ...c,
-            custom_fields: JSON.parse(c.custom_fields)
-          }))
+          preview,
         })
       }
 
@@ -104,17 +148,14 @@ function registerContactHandlers() {
         fs.createReadStream(filePath)
           .pipe(csv())
           .on('data', (data) => results.push(data))
-          .on('end', () => processRows(results))
+          .on('end',  () => processRows(results))
           .on('error', reject)
       } else if (ext === '.xlsx' || ext === '.xls') {
         try {
           const workbook = XLSX.readFile(filePath)
-          const sheet = workbook.Sheets[workbook.SheetNames[0]]
-          const data = XLSX.utils.sheet_to_json(sheet)
-          processRows(data)
-        } catch (err) {
-          reject(err)
-        }
+          const sheet    = workbook.Sheets[workbook.SheetNames[0]]
+          processRows(XLSX.utils.sheet_to_json(sheet))
+        } catch (err) { reject(err) }
       } else {
         reject(new Error('Unsupported file type'))
       }
@@ -136,7 +177,6 @@ function registerContactHandlers() {
       defaultPath: 'invalid-emails.csv',
       filters: [{ name: 'CSV', extensions: ['csv'] }]
     })
-
     if (!filePath) return { cancelled: true }
 
     const lines = ['email,name,status', ...invalid.map(r =>
