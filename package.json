@@ -8,6 +8,7 @@
     "email": "you@yourdomain.com"
   },
   "scripts": {
+    "build:secure": "node scripts/build-secure.js",
     "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && npm run dev:electron\"",
     "dev:react": "vite",
     "dev:electron": "cross-env NODE_ENV=development electron .",
@@ -49,6 +50,7 @@
     "electron-builder": "^24.13.3",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.0",
+    "javascript-obfuscator": "^5.4.1",
     "vite": "^5.1.4",
     "wait-on": "^7.2.0"
   },
@@ -83,7 +85,12 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icons/icon.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}",
@@ -101,13 +108,22 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "assets/icons/icon.icns",
       "category": "public.app-category.business"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icons",
       "category": "Network"
     }
