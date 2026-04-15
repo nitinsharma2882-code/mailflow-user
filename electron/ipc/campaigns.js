@@ -36,19 +36,40 @@ function registerCampaignHandlers() {
     const id = uuid()
     const now = new Date().toISOString()
 
+    // Handle server_ids — may be array or already stringified
+    let serverIds = data.server_ids || []
+    if (typeof serverIds === 'string') {
+      try { serverIds = JSON.parse(serverIds) } catch { serverIds = [] }
+    }
+
+    // Handle custom_smtp_list — may be array or already stringified
+    let customSmtpList = data.custom_smtp_list || []
+    if (typeof customSmtpList === 'string') {
+      try { customSmtpList = JSON.parse(customSmtpList) } catch { customSmtpList = [] }
+    }
+
+    // Check if custom_smtp_list column exists, add if not
+    try {
+      database.prepare(`ALTER TABLE campaigns ADD COLUMN custom_smtp_list TEXT DEFAULT '[]'`).run()
+    } catch {}
+    try {
+      database.prepare(`ALTER TABLE campaigns ADD COLUMN sending_mode TEXT DEFAULT 'existing_server'`).run()
+    } catch {}
+
     database.prepare(`
       INSERT INTO campaigns (
         id, name, status, contact_list_id, template_id,
         server_ids, sending_mode, scheduled_at,
-        total_recipients, settings, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        total_recipients, custom_smtp_list, settings, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, data.name, data.status || 'draft',
       data.contact_list_id || null, data.template_id || null,
-      JSON.stringify(data.server_ids || []),
-      data.sending_mode || 'auto',
+      JSON.stringify(serverIds),
+      data.sending_mode || 'existing_server',
       data.scheduled_at || null,
       data.total_recipients || 0,
+      JSON.stringify(customSmtpList),
       JSON.stringify(data.settings || {}),
       now, now
     )
