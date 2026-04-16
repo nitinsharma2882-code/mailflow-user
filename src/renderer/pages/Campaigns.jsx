@@ -71,6 +71,13 @@ export default function Campaigns() {
     window.api.campaigns.getAll().then(setCampaigns)
   }
 
+  async function handleResend(row) {
+    // Navigate to new campaign with pre-filled data
+    useAppStore.getState().setActivePage('new-campaign')
+    // Store campaign data to pre-fill
+    window._resendCampaign = row
+  }
+
   async function handleExport(id, type) {
     const result = await window.api.sending.exportResults(id, type)
     if (result.success) addToast(`Downloaded ${result.count} rows`, 'success')
@@ -187,6 +194,7 @@ export default function Campaigns() {
                       <Button size="sm" variant="ghost" onClick={() => handleExport(row.id, 'failed')}>↓ Failed CSV</Button>
                     </>
                   )}
+                  <Button size="sm" variant="ghost" onClick={() => handleResend(row)}>✏️ Edit & Resend</Button>
                   <Button size="sm" variant="ghost-danger" onClick={() => handleDelete(row.id)}>🗑 Delete</Button>
                 </div>
               </div>

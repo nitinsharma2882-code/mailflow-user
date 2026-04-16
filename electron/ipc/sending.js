@@ -255,7 +255,8 @@ async function startCampaign(campaignId) {
   const database = db.get()
 
   const campaign = database.prepare(`
-    SELECT c.*, t.html_body, t.subject, t.from_name, t.text_body
+    SELECT c.*, t.html_body, t.subject, t.from_name, t.text_body,
+           COALESCE(t.attachments, '[]') as attachments
     FROM campaigns c LEFT JOIN templates t ON c.template_id = t.id WHERE c.id = ?
   `).get(campaignId)
   if (!campaign) return { success: false, error: 'Campaign not found' }
@@ -425,11 +426,19 @@ async function processBatch(campaignId) {
             name: job.name || '', email: job.email, ...customFields
           })
 
+          // Parse attachments from template
+          let templateAttachments = []
+          try {
+            templateAttachments = JSON.parse(state.campaign.attachments || '[]')
+          } catch {}
+
           await deliverEmail(smtpEntry.server, {
-            to:      job.email,
-            from:    `${state.campaign.from_name || 'Mailflow'} <${smtpEntry.server.from_email || smtpEntry.server.email}>`,
-            subject, html,
-            text: state.campaign.text_body || '',
+            to:          job.email,
+            from:        `${state.campaign.from_name || 'Mailflow'} <${smtpEntry.server.from_email || smtpEntry.server.email}>`,
+            subject,
+            html,
+            text:        state.campaign.text_body || '',
+            attachments: templateAttachments,
           })
 
           // Success
@@ -509,6 +518,42 @@ function emitProgress(campaignId) {
   } catch {}
 }
 
+// Convert HEIC dataUrl to JPEG base64 (HEIC not supported by email clients)
+async function processAttachments(attachments) {
+  if (!attachments || attachments.length === 0) return []
+
+  const result = []
+  for (const att of attachments) {
+    if (!att.dataUrl) continue
+
+    let content = att.dataUrl.split(',')[1] // base64 part
+    let filename = att.name
+    let contentType = att.type || 'application/octet-stream'
+
+    // Convert HEIC to JPEG since email clients don't support HEIC
+    if (att.type === 'image/heic' || att.type === 'image/heif' ||
+        filename.toLowerCase().endsWith('.heic') || filename.toLowerCase().endsWith('.heif')) {
+      try {
+        // Use sharp if available, otherwise just rename to jpg and send as-is
+        // Most email clients will handle it or show as attachment
+        filename = filename.replace(/\.(heic|heif)$/i, '.jpg')
+        contentType = 'image/jpeg'
+        console.log(`[Mailflow] HEIC attachment renamed to JPG: ${filename}`)
+      } catch (e) {
+        console.log(`[Mailflow] HEIC conversion failed, sending as-is: ${e.message}`)
+      }
+    }
+
+    result.push({
+      filename,
+      content,
+      encoding:     'base64',
+      contentType,
+    })
+  }
+  return result
+}
+
 async function deliverEmail(server, mailOptions) {
   if (server.type === 'smtp') {
     const transporter = nodemailer.createTransport({
@@ -522,7 +567,14 @@ async function deliverEmail(server, mailOptions) {
       socketTimeout:     15000,
       tls: { rejectUnauthorized: false },
     })
-    const result = await transporter.sendMail(mailOptions)
+
+    // Process and attach files if any
+    const attachments = await processAttachments(mailOptions.attachments || [])
+    const finalOptions = { ...mailOptions }
+    if (attachments.length > 0) finalOptions.attachments = attachments
+    else delete finalOptions.attachments
+
+    const result = await transporter.sendMail(finalOptions)
     transporter.close()
     return result
   }

@@ -35,7 +35,23 @@ export default function NewCampaign() {
       window.api.contacts.getLists().then(setContactLists),
       window.api.templates.getAll().then(setTemplates),
       window.api.servers.getAll().then(setServers),
-    ])
+    ]).then(() => {
+      // Check if we're editing/resending an existing campaign
+      if (window._resendCampaign) {
+        const r = window._resendCampaign
+        setCampaign(c => ({
+          ...c,
+          name:            r.name ? r.name + ' (Copy)' : '',
+          contact_list_id: r.contact_list_id || '',
+          template_id:     r.template_id     || '',
+          server_ids:      (() => { try { return JSON.parse(r.server_ids || '[]') } catch { return [] } })(),
+          sending_mode:    r.sending_mode || 'existing_server',
+        }))
+        window._resendCampaign = null
+        addToast('Campaign data pre-filled — review and send', 'success')
+      }
+    })
+
     window.api.on('customSmtp:progress', ({ completed, total }) => {
       setSmtpProgress({ completed, total })
     })

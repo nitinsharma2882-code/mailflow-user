@@ -23,13 +23,18 @@ function registerTemplateHandlers() {
     // Auto-detect variables like {{name}}, {{company}}
     const vars = extractVariables(data.html_body || '')
 
+    // Add attachments column if not exists
+    try { database.prepare(`ALTER TABLE templates ADD COLUMN attachments TEXT DEFAULT '[]'`).run() } catch {}
+
     database.prepare(`
-      INSERT INTO templates (id, name, subject, from_name, html_body, text_body, variables, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO templates (id, name, subject, from_name, html_body, text_body, variables, attachments, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, data.name, data.subject, data.from_name || null,
       data.html_body, data.text_body || null,
-      JSON.stringify(vars), now, now
+      JSON.stringify(vars),
+      data.attachments || '[]',
+      now, now
     )
 
     return { id, ...data, variables: vars, created_at: now }
@@ -44,12 +49,14 @@ function registerTemplateHandlers() {
       UPDATE templates SET
         name = ?, subject = ?, from_name = ?,
         html_body = ?, text_body = ?,
-        variables = ?, updated_at = ?
+        variables = ?, attachments = ?, updated_at = ?
       WHERE id = ?
     `).run(
       data.name, data.subject, data.from_name || null,
       data.html_body, data.text_body || null,
-      JSON.stringify(vars), now, id
+      JSON.stringify(vars),
+      data.attachments || '[]',
+      now, id
     )
 
     return { success: true, variables: vars }
