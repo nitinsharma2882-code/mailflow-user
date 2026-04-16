@@ -25,6 +25,7 @@ function initialize() {
   db.pragma('synchronous = NORMAL')
   
   runMigrations()
+  fixEmailJobsSchema()
   console.log(`[DB] Initialized at: ${dbPath}`)
   return db
 }
@@ -110,7 +111,7 @@ function runMigrations() {
     CREATE TABLE IF NOT EXISTS email_jobs (
       id            TEXT PRIMARY KEY,
       campaign_id   TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-      contact_id    TEXT NOT NULL REFERENCES contacts(id),
+      contact_id    TEXT REFERENCES contacts(id),
       server_id     TEXT REFERENCES servers(id),
       email         TEXT NOT NULL,
       status        TEXT DEFAULT 'pending',
@@ -155,6 +156,46 @@ function runMigrations() {
       ('default_sending_mode', 'auto');
   `)
   console.log('[DB] Migrations complete')
+}
+
+function fixEmailJobsSchema() {
+  // Fix email_jobs to allow NULL contact_id (for custom SMTP campaigns)
+  try {
+    // Check if we need to recreate the table
+    const tableInfo = db.prepare("PRAGMA table_info(email_jobs)").all()
+    const contactIdCol = tableInfo.find(c => c.name === 'contact_id')
+    if (contactIdCol && contactIdCol.notnull === 1) {
+      // Recreate table without NOT NULL constraint
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        BEGIN TRANSACTION;
+        CREATE TABLE IF NOT EXISTS email_jobs_new (
+          id            TEXT PRIMARY KEY,
+          campaign_id   TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          contact_id    TEXT,
+          server_id     TEXT,
+          email         TEXT NOT NULL,
+          status        TEXT DEFAULT 'pending',
+          attempts      INTEGER DEFAULT 0,
+          max_attempts  INTEGER DEFAULT 3,
+          error         TEXT,
+          sent_at       TEXT,
+          next_retry_at TEXT,
+          created_at    TEXT DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO email_jobs_new SELECT * FROM email_jobs;
+        DROP TABLE email_jobs;
+        ALTER TABLE email_jobs_new RENAME TO email_jobs;
+        CREATE INDEX IF NOT EXISTS idx_jobs_campaign ON email_jobs(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_jobs_status ON email_jobs(status);
+        COMMIT;
+        PRAGMA foreign_keys = ON;
+      `)
+      console.log('[DB] Fixed email_jobs schema — contact_id now nullable')
+    }
+  } catch (err) {
+    console.log('[DB] Schema fix note:', err.message)
+  }
 }
 
 function get() {

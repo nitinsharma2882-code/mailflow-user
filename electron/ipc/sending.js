@@ -295,14 +295,25 @@ async function startCampaign(campaignId) {
   // Delete any old jobs for this campaign first
   database.prepare(`DELETE FROM email_jobs WHERE campaign_id=?`).run(campaignId)
 
-  // Create fresh jobs
+  // Disable FK checks temporarily to avoid contact_id constraint issues
+  database.pragma('foreign_keys = OFF')
+
   const insertJob = database.prepare(`
     INSERT INTO email_jobs (id, campaign_id, contact_id, email, status, created_at)
     VALUES (?, ?, ?, ?, 'pending', datetime('now'))
   `)
+
   database.transaction(() => {
-    for (const c of contacts) insertJob.run(uuid(), campaignId, c.id, c.email)
+    for (const c of contacts) {
+      insertJob.run(uuid(), campaignId, c.id, c.email)
+    }
   })()
+
+  database.pragma('foreign_keys = ON')
+
+  // Verify jobs were created
+  const jobCount = database.prepare(`SELECT COUNT(*) as cnt FROM email_jobs WHERE campaign_id=?`).get(campaignId)
+  console.log(`[Mailflow] Created ${jobCount.cnt} email jobs for campaign`)
 
   database.prepare(`
     UPDATE campaigns SET status='running', started_at=datetime('now'),
@@ -350,7 +361,11 @@ async function processBatch(campaignId) {
 
     // Fetch pending jobs
     const jobs = database.prepare(`
-      SELECT j.*, c.name, c.custom_fields FROM email_jobs j
+      SELECT j.id, j.campaign_id, j.contact_id, j.email, j.status,
+             j.attempts, j.error, j.next_retry_at,
+             COALESCE(c.name, '') as name,
+             COALESCE(c.custom_fields, '{}') as custom_fields
+      FROM email_jobs j
       LEFT JOIN contacts c ON j.contact_id = c.id
       WHERE j.campaign_id=? AND j.status IN ('pending','retrying')
         AND (j.next_retry_at IS NULL OR j.next_retry_at <= datetime('now'))
@@ -363,7 +378,8 @@ async function processBatch(campaignId) {
         WHERE campaign_id=? AND status NOT IN ('sent','failed')
       `).get(campaignId)
 
-      console.log(`[Mailflow] No pending jobs. Remaining: ${remaining.cnt}`)
+      const allJobs = database.prepare(`SELECT COUNT(*) as cnt FROM email_jobs WHERE campaign_id=?`).get(campaignId)
+      console.log(`[Mailflow] No pending jobs. Remaining: ${remaining.cnt}, Total jobs in DB: ${allJobs.cnt}`)
 
       if (remaining.cnt === 0) {
         finalizeCampaign(campaignId)
@@ -394,8 +410,10 @@ async function processBatch(campaignId) {
           return
         }
 
+        // Only store server_id if it's a real DB server (not custom SMTP)
+        const serverId = smtpEntry.server._isCustom ? null : smtpEntry.id
         database.prepare(`UPDATE email_jobs SET status='sending', server_id=? WHERE id=?`)
-          .run(smtpEntry.id, job.id)
+          .run(serverId, job.id)
 
         try {
           const customFields = JSON.parse(job.custom_fields || '{}')
@@ -418,7 +436,7 @@ async function processBatch(campaignId) {
           state.rotation.markSuccess(smtpEntry.id)
           database.prepare(`UPDATE email_jobs SET status='sent', sent_at=datetime('now'), attempts=attempts+1 WHERE id=?`).run(job.id)
           database.prepare(`UPDATE campaigns SET sent_count=sent_count+1, delivered_count=delivered_count+1 WHERE id=?`).run(campaignId)
-          if (smtpEntry.server.id) database.prepare(`UPDATE servers SET sent_today=sent_today+1 WHERE id=?`).run(smtpEntry.server.id)
+          if (smtpEntry.server.id && !smtpEntry.server._isCustom) database.prepare(`UPDATE servers SET sent_today=sent_today+1 WHERE id=?`).run(smtpEntry.server.id)
           totalSent++
 
         } catch (err) {
