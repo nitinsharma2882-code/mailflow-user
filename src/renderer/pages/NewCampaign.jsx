@@ -48,7 +48,7 @@ export default function NewCampaign() {
           sending_mode:    r.sending_mode || 'existing_server',
         }))
         window._resendCampaign = null
-        addToast('Campaign data pre-filled — review and send', 'success')
+        console.log('[Mailflow] Campaign data pre-filled')
       }
     })
 
@@ -77,7 +77,7 @@ export default function NewCampaign() {
       setSelectedListInfo({ total: data.total, valid: data.valid, invalid: data.invalid })
       setPreview(data.preview || [])
       await window.api.contacts.getLists().then(setContactLists)
-      addToast(`Imported ${data.total.toLocaleString()} contacts`, 'success')
+      console.log(`[Mailflow] Imported ${data.total} contacts`)
     } catch (err) {
       addToast('Import failed: ' + err.message, 'error')
     } finally {
@@ -97,7 +97,7 @@ export default function NewCampaign() {
   async function handleDownloadInvalid() {
     if (!campaign.contact_list_id) return
     await window.api.contacts.exportInvalid(campaign.contact_list_id)
-    addToast('Invalid emails downloaded', 'success')
+    console.log('[Mailflow] Invalid emails downloaded')
   }
 
   // ── Step 4: Server ──
@@ -136,13 +136,15 @@ export default function NewCampaign() {
   }
 
   async function parseAndSetSmtpAccounts(text) {
+    // Yield to UI before heavy parsing
+    await new Promise(r => setTimeout(r, 0))
     const parsed = await window.api.customSmtp.parseCsv(text)
     if (parsed.success && parsed.accounts.length > 0) {
       setSmtpCsvAccounts(parsed.accounts)
       setSmtpValidated(false)
       setSmtpProgress({ completed: 0, total: 0 })
       setSmtpResults({ working: [], failed: [], timeout: [], quotaExceeded: [] })
-      addToast(`✅ Loaded ${parsed.accounts.length} SMTP accounts`, 'success')
+      addToast(`Loaded ${parsed.accounts.length} SMTP accounts`, 'success')
     } else {
       addToast(parsed.error || 'No valid accounts found. Format: email,app_password', 'error')
     }
@@ -189,13 +191,13 @@ export default function NewCampaign() {
     setSmtpProgress({ completed: 0, total: 0 })
     setSmtpResults({ working: [], failed: [], timeout: [], quotaExceeded: [] })
     setCampaign(c => ({ ...c, custom_smtp_list: [] }))
-    addToast('SMTP list cleared', 'success')
+    console.log('[Mailflow] SMTP cleared')
   }
 
   async function handleExportSmtp(type) {
     const accounts = type === 'working' ? smtpResults.working : smtpResults.failed
     await window.api.customSmtp.exportCsv({ accounts, filename: `${type}-smtp.csv` })
-    addToast(`${type} SMTP accounts downloaded`, 'success')
+    console.log(`[Mailflow] ${type} SMTP downloaded`)
   }
 
   // ── Test email ──
@@ -232,8 +234,18 @@ export default function NewCampaign() {
     }
     setLaunching(true)
     try {
+      // Always fetch latest template to avoid stale data
+      let latestTemplateId = campaign.template_id
+      if (campaign.template_id) {
+        const freshTemplates = await window.api.templates.getAll()
+        setTemplates(freshTemplates)
+        const found = freshTemplates.find(t => t.id === campaign.template_id)
+        if (found) latestTemplateId = found.id
+      }
+
       const created = await window.api.campaigns.create({
         ...campaign,
+        template_id: latestTemplateId,
         status: scheduleOnly ? 'scheduled' : 'draft',
         total_recipients: selectedListInfo?.total || 0,
         server_ids: JSON.stringify(campaign.server_ids),
@@ -777,10 +789,10 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
       let saved
       if (editing === 'new') {
         saved = await window.api.templates.create(templateData)
-        addToast('Template created', 'success')
+        console.log('[Mailflow] Template created')
       } else {
         saved = await window.api.templates.update(editing, templateData)
-        addToast('Template saved', 'success')
+        console.log('[Mailflow] Template saved')
       }
       const all = await window.api.templates.getAll()
       setTemplates(all)
@@ -797,21 +809,21 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
 
   async function handleUseTemplate(t) {
     setCampaign(c => ({ ...c, template_id: t.id }))
-    addToast(`Template "${t.name}" selected`, 'success')
+    console.log(`[Mailflow] Template selected: ${t.name}`)
     onNext()
   }
 
   async function handleDelete(id) {
     if (!confirm('Delete this template?')) return
     await window.api.templates.delete(id)
-    addToast('Template deleted')
+    console.log('[Mailflow] Template deleted')
     if (campaign.template_id === id) setCampaign(c => ({ ...c, template_id: '' }))
     window.api.templates.getAll().then(setTemplates)
   }
 
   async function handleDuplicate(id) {
     await window.api.templates.duplicate(id)
-    addToast('Template duplicated', 'success')
+    console.log('[Mailflow] Template duplicated')
     window.api.templates.getAll().then(setTemplates)
   }
 

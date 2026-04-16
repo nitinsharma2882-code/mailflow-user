@@ -432,11 +432,14 @@ async function processBatch(campaignId) {
             templateAttachments = JSON.parse(state.campaign.attachments || '[]')
           } catch {}
 
+          // Inject open tracking pixel
+          const trackedHtml = injectTrackingPixel(html, job.id, null)
+
           await deliverEmail(smtpEntry.server, {
             to:          job.email,
             from:        `${state.campaign.from_name || 'Mailflow'} <${smtpEntry.server.from_email || smtpEntry.server.email}>`,
             subject,
-            html,
+            html:        trackedHtml,
             text:        state.campaign.text_body || '',
             attachments: templateAttachments,
           })
@@ -609,6 +612,17 @@ async function deliverEmail(server, mailOptions) {
 function mergeTemplate(template, data) {
   if (!template) return ''
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => data[key] || '')
+}
+
+function injectTrackingPixel(html, jobId, trackingDomain) {
+  if (!html || !jobId) return html
+  const domain = trackingDomain || 'http://localhost:3001'
+  const pixel = `<img src="${domain}/track/open/${jobId}" width="1" height="1" style="display:none;border:0;" alt="" />`
+  // Inject before closing body tag, or append at end
+  if (html.includes('</body>')) {
+    return html.replace('</body>', `${pixel}</body>`)
+  }
+  return html + pixel
 }
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }

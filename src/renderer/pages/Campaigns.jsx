@@ -72,10 +72,14 @@ export default function Campaigns() {
   }
 
   async function handleResend(row) {
-    // Navigate to new campaign with pre-filled data
-    useAppStore.getState().setActivePage('new-campaign')
-    // Store campaign data to pre-fill
-    window._resendCampaign = row
+    // Store full campaign data including template and list info
+    window._resendCampaign = {
+      ...row,
+      // Parse server_ids if it's a string
+      server_ids: (() => { try { return typeof row.server_ids === 'string' ? JSON.parse(row.server_ids) : (row.server_ids || []) } catch { return [] } })(),
+      sending_mode: row.sending_mode || 'existing_server',
+    }
+    setActivePage('new-campaign')
   }
 
   async function handleExport(id, type) {
