@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('api', {
   analytics: {
     getDashboard: () => ipcRenderer.invoke('analytics:dashboard'),
     getCampaignStats: (campaignId) => ipcRenderer.invoke('analytics:campaign', campaignId),
+    getOpeners: (campaignId) => ipcRenderer.invoke('analytics:openers', campaignId),
     getOverview: (period) => ipcRenderer.invoke('analytics:overview', period),
     export: (period) => ipcRenderer.invoke('analytics:export', period),
   },

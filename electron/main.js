@@ -12,10 +12,11 @@ const { registerSmtpHandlers }      = require('./ipc/smtp')
 const { registerAnalyticsHandlers } = require('./ipc/analytics')
 const { registerCustomSmtpHandlers } = require('./ipc/customSmtp')
 const { registerLicenseHandlers, checkLicense } = require('./license')
+const { startTrackingServer, stopTrackingServer } = require('./ipc/tracking')
 const db = require('../database/db')
 
 let mainWindow
-let licenseValid = isDev // skip check in dev mode
+let licenseValid = isDev
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -31,6 +32,18 @@ function createWindow() {
     },
     show: false,
     title: 'Mailflow'
+  })
+
+  // Allow fetch to license server + tracking server
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self'; connect-src 'self' https://mailflow-license-server-production.up.railway.app https: http://localhost:3001; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: http://localhost:3001 https:;"
+        ]
+      }
+    })
   })
 
   if (isDev) {
@@ -52,6 +65,9 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   db.initialize()
+
+  // Start tracking server for open tracking
+  startTrackingServer()
 
   registerCampaignHandlers()
   registerContactHandlers()
@@ -90,6 +106,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  stopTrackingServer()
   if (process.platform !== 'darwin') app.quit()
 })
 

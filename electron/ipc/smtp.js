@@ -150,6 +150,35 @@ function registerAnalyticsHandlers() {
     return campaigns
   })
 
+  ipcMain.handle('analytics:openers', (_, campaignId) => {
+    const database = db.get()
+    // Get all unique emails that opened this campaign
+    const openers = database.prepare(`
+      SELECT DISTINCT
+        json_extract(te.metadata, '$.email') as email,
+        te.created_at as opened_at,
+        j.id as job_id
+      FROM tracking_events te
+      LEFT JOIN email_jobs j ON te.job_id = j.id
+      WHERE te.campaign_id = ? AND te.type = 'open'
+      ORDER BY te.created_at DESC
+    `).all(campaignId)
+
+    const campaign = database.prepare(
+      'SELECT sent_count, open_count, total_recipients FROM campaigns WHERE id = ?'
+    ).get(campaignId)
+
+    return {
+      openers,
+      total:     campaign?.total_recipients || 0,
+      sent:      campaign?.sent_count || 0,
+      openCount: campaign?.open_count || 0,
+      openRate:  campaign?.sent_count > 0
+        ? ((campaign.open_count / campaign.sent_count) * 100).toFixed(1)
+        : '0.0'
+    }
+  })
+
   ipcMain.handle('analytics:campaign', (_, campaignId) => {
     const database = db.get()
     const campaign = database.prepare('SELECT * FROM campaigns WHERE id = ?').get(campaignId)

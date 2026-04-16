@@ -288,6 +288,19 @@ export default function NewCampaign() {
   }
 
   const selectedTemplate = templates.find(t => t.id === campaign.template_id)
+  const [fullTemplate, setFullTemplate] = React.useState(null)
+
+  // Load full template (with html_body + attachments) when template changes or step reaches 5
+  React.useEffect(() => {
+    if (campaign.template_id && step === 5) {
+      window.api.templates.getById(campaign.template_id).then(t => {
+        setFullTemplate(t)
+      }).catch(() => setFullTemplate(selectedTemplate))
+    }
+  }, [campaign.template_id, step])
+
+  // Use fullTemplate on step 5, selectedTemplate elsewhere
+  const previewTemplate = step === 5 ? (fullTemplate || selectedTemplate) : selectedTemplate
 
   const IS = {
     width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
@@ -619,6 +632,78 @@ export default function NewCampaign() {
       {step === 5 && (
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Preview & Send</div>
+
+          {/* Inbox-like email preview */}
+          {previewTemplate && (
+            <div style={{ marginBottom: 20, border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden' }}>
+              {/* Email header — like real inbox */}
+              <div style={{ background: 'var(--bg3)', padding: '14px 18px', borderBottom: '1px solid var(--bdr)' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--txt)' }}>
+                  {previewTemplate.subject || '(No subject)'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--txt3)', minWidth: 60 }}>From:</span>
+                    <span style={{ color: 'var(--txt)' }}>
+                      {previewTemplate.from_name || 'Mailflow'} &lt;{
+                        campaign.sending_mode === 'custom_smtp' && campaign.custom_smtp_list?.length > 0
+                          ? campaign.custom_smtp_list[0]?.email
+                          : servers.find(s => campaign.server_ids.includes(s.id))?.from_email || 'sender@example.com'
+                      }&gt;
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--txt3)', minWidth: 60 }}>To:</span>
+                    <span style={{ color: 'var(--txt2)' }}>
+                      {selectedListInfo ? `${selectedListInfo.valid?.toLocaleString()} recipients` : 'Recipients'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--txt3)', minWidth: 60 }}>Date:</span>
+                    <span style={{ color: 'var(--txt2)' }}>{new Date().toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Email body — full HTML render */}
+              <div style={{ background: '#ffffff', padding: '20px', maxHeight: 400, overflowY: 'auto' }}>
+                <div style={{ fontSize: 13, lineHeight: 1.7, color: '#000' }}
+                  dangerouslySetInnerHTML={{ __html: previewTemplate.html_body }} />
+              </div>
+
+              {/* Attachments section */}
+              {(() => {
+                const atts = (() => { try { return JSON.parse(selectedTemplate.attachments || '[]') } catch { return [] } })()
+                if (atts.length === 0) return null
+                return (
+                  <div style={{ background: 'var(--bg2)', borderTop: '1px solid var(--bdr)', padding: '12px 18px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', marginBottom: 8 }}>
+                      📎 Attachments ({atts.length})
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {atts.map((att, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '6px 10px', background: 'var(--bg3)', border: '1px solid var(--bdr)',
+                          borderRadius: 'var(--rad)', fontSize: 12 }}>
+                          <span>{att.type?.startsWith('image/') ? '🖼' : att.type === 'application/pdf' ? '📕' : att.type?.startsWith('video/') ? '🎬' : '📄'}</span>
+                          <span style={{ fontWeight: 500 }}>{att.name}</span>
+                          <span style={{ color: 'var(--txt3)', fontSize: 11 }}>
+                            {att.size < 1024*1024 ? (att.size/1024).toFixed(1)+'KB' : (att.size/(1024*1024)).toFixed(1)+'MB'}
+                          </span>
+                          {att.type?.startsWith('image/') && att.dataUrl && (
+                            <img src={att.dataUrl} alt={att.name}
+                              style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 3, border: '1px solid var(--bdr)' }} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
+          {/* Campaign summary */}
           <div className={styles.summaryBox} style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Campaign Summary</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 13 }}>
@@ -626,13 +711,13 @@ export default function NewCampaign() {
                 ['Campaign Name',   campaign.name],
                 ['Total Recipients',(selectedListInfo?.valid || 0).toLocaleString()],
                 ['Invalid Skipped', (selectedListInfo?.invalid || 0).toLocaleString()],
-                ['Template',        selectedTemplate?.name || '—'],
+                ['Template',        previewTemplate?.name || selectedTemplate?.name || '—'],
                 ['Sending Method',  campaign.sending_mode === 'custom_smtp'
                   ? `Custom SMTP (${campaign.custom_smtp_list?.length || 0} accounts)`
                   : `${campaign.server_ids.length} server(s)`],
                 ['Schedule',        campaign.scheduled_at || 'Start immediately'],
-                ['Open Tracking',   'Enabled'],
-                ['Click Tracking',  'Enabled'],
+                ['Open Tracking',   '✅ Enabled'],
+                ['Click Tracking',  '✅ Enabled'],
               ].map(([k, v]) => (
                 <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bdr)' }}>
                   <span style={{ color: 'var(--txt2)' }}>{k}</span>
@@ -642,22 +727,7 @@ export default function NewCampaign() {
             </div>
           </div>
 
-          {selectedTemplate && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', marginBottom: 8 }}>EMAIL PREVIEW:</div>
-              <div style={{ border: '1px solid var(--bdr)', borderRadius: 'var(--rad)',
-                padding: '16px', background: '#fff', fontSize: 13, lineHeight: 1.6,
-                maxHeight: 250, overflow: 'auto', color: '#000' }}
-                dangerouslySetInnerHTML={{ __html: selectedTemplate.html_body }}
-              />
-              {selectedTemplate.attachments && JSON.parse(selectedTemplate.attachments || '[]').length > 0 && (
-                <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', fontSize: 12 }}>
-                  📎 {JSON.parse(selectedTemplate.attachments).length} attachment(s) will be sent with this email
-                </div>
-              )}
-            </div>
-          )}
-
+          {/* Test email */}
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', padding: '14px', marginBottom: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Send Test Email (recommended)</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -668,6 +738,7 @@ export default function NewCampaign() {
             </div>
           </div>
 
+          {/* Checklist */}
           <div className={styles.checkList} style={{ marginBottom: 20 }}>
             <CheckItem ok={!!campaign.contact_list_id} text={selectedListInfo ? `${selectedListInfo.valid?.toLocaleString()} valid recipients · ${selectedListInfo.invalid?.toLocaleString()} invalid skipped` : 'No contact list'} />
             <CheckItem ok={!!campaign.template_id} text={selectedTemplate ? `Template: "${selectedTemplate.name}"` : 'No template selected'} />

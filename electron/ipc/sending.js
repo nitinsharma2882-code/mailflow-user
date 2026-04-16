@@ -3,6 +3,7 @@ const { v4: uuid } = require('uuid')
 const nodemailer = require('nodemailer')
 const db = require('../../database/db')
 const { getSmtpConfig, isQuotaError } = require('./customSmtp')
+const { getTrackingUrl } = require('./tracking')
 
 const runningCampaigns = new Map()
 
@@ -432,8 +433,8 @@ async function processBatch(campaignId) {
             templateAttachments = JSON.parse(state.campaign.attachments || '[]')
           } catch {}
 
-          // Inject open tracking pixel
-          const trackedHtml = injectTrackingPixel(html, job.id, null)
+          // Inject open tracking pixel with local tracking server URL
+          const trackedHtml = injectTrackingPixel(html, job.id, getTrackingUrl())
 
           await deliverEmail(smtpEntry.server, {
             to:          job.email,
@@ -616,12 +617,12 @@ function mergeTemplate(template, data) {
 
 function injectTrackingPixel(html, jobId, trackingDomain) {
   if (!html || !jobId) return html
-  const domain = trackingDomain || 'http://localhost:3001'
-  const pixel = `<img src="${domain}/track/open/${jobId}" width="1" height="1" style="display:none;border:0;" alt="" />`
-  // Inject before closing body tag, or append at end
-  if (html.includes('</body>')) {
-    return html.replace('</body>', `${pixel}</body>`)
-  }
+  const domain = (trackingDomain || 'http://localhost:3001').replace(/\/$/, '')
+  // Use unique timestamp to bypass email client caching
+  const ts = Date.now()
+  const pixel = '<img src="' + domain + '/track/open/' + jobId + '?t=' + ts + '" width="1" height="1" style="display:none !important;border:0;outline:0;max-height:1px;max-width:1px;opacity:0;" alt="" />'
+  if (html.includes('</body>')) return html.replace('</body>', pixel + '</body>')
+  if (html.includes('</html>')) return html.replace('</html>', pixel + '</html>')
   return html + pixel
 }
 
