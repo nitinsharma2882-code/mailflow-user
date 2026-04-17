@@ -14,13 +14,45 @@ const LICENSE_FILE   = path.join(app ? app.getPath('userData') : '.', 'license.d
 const SESSION_CHECK_INTERVAL = 30 * 60 * 1000
 let sessionCheckTimer = null
 
+function getMacAddress() {
+  try {
+    const interfaces = os.networkInterfaces()
+    const macs = []
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+          macs.push(iface.mac)
+        }
+      }
+    }
+    return macs.sort().join(',')
+  } catch (e) { return '' }
+}
+
+function getWindowsGuid() {
+  try {
+    // Try to read Windows MachineGuid — unique per Windows installation
+    const { execSync } = require('child_process')
+    const result = execSync(
+      'reg query HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid',
+      { encoding: 'utf8', timeout: 3000, windowsHide: true }
+    )
+    const match = result.match(/MachineGuid\s+REG_SZ\s+([\w-]+)/)
+    return match ? match[1] : ''
+  } catch (e) { return '' }
+}
+
 function getHardwareId() {
+  const mac      = getMacAddress()
+  const winGuid  = getWindowsGuid()
   const data = [
     os.hostname(),
     os.platform(),
     os.arch(),
     os.cpus()[0] ? os.cpus()[0].model : '',
     os.totalmem().toString(),
+    mac,
+    winGuid,
   ].join('|')
   return crypto.createHash('sha256').update(data).digest('hex').substring(0, 32)
 }
