@@ -66,20 +66,23 @@ function httpPost(endpoint, body) {
     const fullUrl = `${LICENSE_SERVER}${endpoint}`
     const data    = JSON.stringify(body)
 
-    // Parse URL properly for Electron's net module
-    let parsedUrl
-    try {
-      parsedUrl = new URL(fullUrl)
-    } catch (e) {
-      return reject(new Error('Invalid license server URL: ' + fullUrl))
-    }
+    // Parse URL manually — avoids obfuscation issues with URL constructor
+    const isHttps   = fullUrl.startsWith('https://')
+    const protocol  = isHttps ? 'https:' : 'http:'
+    const withoutProto = fullUrl.replace(/^https?:\/\//, '')
+    const slashIdx  = withoutProto.indexOf('/')
+    const hostPart  = slashIdx === -1 ? withoutProto : withoutProto.substring(0, slashIdx)
+    const urlPath   = slashIdx === -1 ? '/' : withoutProto.substring(slashIdx)
+    const colonIdx  = hostPart.indexOf(':')
+    const hostname  = colonIdx === -1 ? hostPart : hostPart.substring(0, colonIdx)
+    const port      = colonIdx === -1 ? (isHttps ? 443 : 80) : parseInt(hostPart.substring(colonIdx + 1))
 
     const request = net.request({
       method:   'POST',
-      protocol: parsedUrl.protocol,
-      hostname: parsedUrl.hostname,
-      port:     parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
-      path:     parsedUrl.pathname + parsedUrl.search,
+      protocol: protocol,
+      hostname: hostname,
+      port:     port,
+      path:     urlPath,
     })
 
     request.setHeader('Content-Type', 'application/json')
