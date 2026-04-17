@@ -30,6 +30,8 @@ export default function App() {
   const [licenseStatus, setLicenseStatus] = useState('checking')
   const [licenseInfo,   setLicenseInfo]   = useState(null)
   const [expiredPlan,   setExpiredPlan]   = useState(false)
+  const [expiredMessage, setExpiredMessage] = useState(null)
+  const [expiringSoonMsg, setExpiringSoonMsg] = useState(null)
   const isDev = import.meta.env.DEV
 
   useEffect(() => {
@@ -41,16 +43,31 @@ export default function App() {
     checkLicenseStatus()
 
     if (window.api) {
+      // Campaign events
       window.api.on('sending:progress', (data) => {
         setCampaignProgress(data.campaignId, data)
         updateCampaign(data.campaignId, {
-          sent_count: data.sent_count,
+          sent_count:   data.sent_count,
           failed_count: data.failed_count,
         })
       })
       window.api.on('campaign:statusChange', (id, status) => {
         updateCampaign(id, { status })
         if (status === 'sent') addToast('Campaign completed!', 'success')
+      })
+
+      // License expired during session — lock app immediately
+      window.api.on('license:expired', ({ reason, error }) => {
+        console.log('[License] Expired during session:', reason)
+        setExpiredPlan(true)
+        setExpiredMessage(error || 'Your license key has expired. Please enter a valid key to continue.')
+        setLicenseStatus('invalid')
+        setLicenseInfo(null)
+      })
+
+      // License expiring soon — show warning banner
+      window.api.on('license:expiringSoon', ({ daysRemaining, expiresAt }) => {
+        setExpiringSoonMsg(`⚠️ Your license expires in ${daysRemaining} day(s). Renew soon to avoid interruption.`)
       })
     }
   }, [])
@@ -62,16 +79,13 @@ export default function App() {
         setLicenseInfo(result.license)
         setLicenseStatus('valid')
 
-        // Warn if expiring soon
-        if (result.license?.expiringSoon) {
-          addToast(
-            `License expires in ${result.license.daysRemaining} day(s) — renew soon`,
-            'warning',
-            8000
-          )
+        // Show expiring soon warning
+        if (result.license?.expiringSoon && result.license?.daysRemaining !== null) {
+          setExpiringSoonMsg(`⚠️ Your license expires in ${result.license.daysRemaining} day(s). Renew soon.`)
         }
       } else {
         setExpiredPlan(result.reason === 'expired')
+        setExpiredMessage(result.error)
         setLicenseStatus('invalid')
       }
     } catch {
@@ -100,7 +114,7 @@ export default function App() {
     )
   }
 
-  // Not licensed / expired
+  // Expired / Invalid
   if (licenseStatus === 'invalid') {
     return (
       <>
@@ -108,9 +122,12 @@ export default function App() {
           onActivated={(info) => {
             setLicenseInfo(info)
             setExpiredPlan(false)
+            setExpiredMessage(null)
+            setExpiringSoonMsg(null)
             setLicenseStatus('valid')
           }}
           expiredPlan={expiredPlan}
+          expiredMessage={expiredMessage}
         />
         <Toast />
       </>
@@ -122,6 +139,20 @@ export default function App() {
   return (
     <>
       <Layout licenseInfo={licenseInfo}>
+        {/* Expiring soon banner */}
+        {expiringSoonMsg && (
+          <div style={{
+            background: '#FFF3CD', borderBottom: '1px solid #F39C12',
+            padding: '8px 20px', fontSize: 12, color: '#856404',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          }}>
+            <span>{expiringSoonMsg}</span>
+            <button onClick={() => setExpiringSoonMsg(null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#856404', fontSize: 16, lineHeight: 1 }}>
+              ×
+            </button>
+          </div>
+        )}
         <PageComponent />
       </Layout>
       <Toast />

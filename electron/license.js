@@ -1,4 +1,4 @@
-const { app, ipcMain, net } = require('electron')
+const { app, ipcMain, net, BrowserWindow } = require('electron')
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 const crypto = require('crypto')
 const os     = require('os')
@@ -7,6 +7,10 @@ const fs     = require('fs')
 
 const LICENSE_SERVER = process.env.LICENSE_SERVER_URL || 'https://mailflow-license-server-production.up.railway.app'
 const LICENSE_FILE   = path.join(app ? app.getPath('userData') : '.', 'license.dat')
+
+// Session check interval — every 30 minutes
+const SESSION_CHECK_INTERVAL = 30 * 60 * 1000
+let sessionCheckTimer = null
 
 function getHardwareId() {
   const data = [
@@ -59,82 +63,163 @@ function clearLicense() {
 
 function httpPost(endpoint, body) {
   return new Promise((resolve, reject) => {
-    const url = `${LICENSE_SERVER}${endpoint}`
+    const url  = `${LICENSE_SERVER}${endpoint}`
     const data = JSON.stringify(body)
 
-    const request = net.request({
-      method: 'POST',
-      url: url,
-    })
-
+    const request = net.request({ method: 'POST', url })
     request.setHeader('Content-Type', 'application/json')
     request.setHeader('Content-Length', Buffer.byteLength(data))
 
     let responseBody = ''
-
     request.on('response', (response) => {
-      response.on('data', (chunk) => {
-        responseBody += chunk.toString()
-      })
+      response.on('data', (chunk) => { responseBody += chunk.toString() })
       response.on('end', () => {
-        try {
-          resolve(JSON.parse(responseBody))
-        } catch (e) {
-          reject(new Error('Invalid server response: ' + responseBody))
-        }
+        try { resolve(JSON.parse(responseBody)) }
+        catch (e) { reject(new Error('Invalid server response')) }
       })
     })
-
-    request.on('error', (err) => {
-      reject(new Error('Network error: ' + err.message))
-    })
-
+    request.on('error', (err) => reject(new Error('Network error: ' + err.message)))
     request.write(data)
     request.end()
   })
 }
 
+// ── SESSION VALIDATION — runs periodically while app is open ─────
+async function validateSession() {
+  const local = loadLicense()
+  if (!local?.key) return
+
+  try {
+    const hardwareId = getHardwareId()
+    const result = await httpPost('/api/session/validate', {
+      licenseKey: local.key,
+      hardwareId
+    })
+
+    if (!result.valid) {
+      // License expired or revoked during session
+      clearLicense()
+      stopSessionCheck()
+
+      // Notify all windows
+      BrowserWindow.getAllWindows().forEach(w => {
+        try {
+          w.webContents.send('license:expired', {
+            reason: result.reason,
+            error:  result.error || 'Your license key has expired. Please enter a valid key to continue.'
+          })
+        } catch {}
+      })
+
+      console.log(`[License] Session invalid: ${result.reason}`)
+      return
+    }
+
+    // Warn if expiring soon
+    if (result.expiringSoon && result.daysRemaining !== null) {
+      BrowserWindow.getAllWindows().forEach(w => {
+        try {
+          w.webContents.send('license:expiringSoon', {
+            daysRemaining: result.daysRemaining,
+            expiresAt:     result.expiresAt
+          })
+        } catch {}
+      })
+    }
+
+    // Update local cache
+    saveLicense({
+      ...local,
+      expiresAt:     result.expiresAt,
+      daysRemaining: result.daysRemaining,
+      lastVerified:  new Date().toISOString()
+    })
+
+  } catch (err) {
+    console.log('[License] Session check failed (offline):', err.message)
+    // Don't invalidate — user might be offline
+  }
+}
+
+function startSessionCheck() {
+  stopSessionCheck()
+  // Check after 5 minutes first time, then every 30 min
+  setTimeout(() => {
+    validateSession()
+    sessionCheckTimer = setInterval(validateSession, SESSION_CHECK_INTERVAL)
+  }, 5 * 60 * 1000)
+}
+
+function stopSessionCheck() {
+  if (sessionCheckTimer) {
+    clearInterval(sessionCheckTimer)
+    sessionCheckTimer = null
+  }
+}
+
+// ── CHECK LICENSE ON STARTUP ─────────────────────────────────────
 async function checkLicense() {
   const hardwareId = getHardwareId()
   const local      = loadLicense()
 
   if (!local?.key) return { valid: false, reason: 'no_license' }
 
+  // Local expiry check first (fast)
   if (local.expiresAt && new Date(local.expiresAt) < new Date()) {
     clearLicense()
     return {
       valid: false,
       reason: 'expired',
-      error: 'Your license has expired. Enter a new key to continue.',
+      error: 'Your license key has expired. Please enter a valid key to continue.',
       expiredAt: local.expiresAt
     }
   }
 
   try {
     const result = await httpPost('/api/verify', { licenseKey: local.key, hardwareId })
+
     if (result.success) {
       saveLicense({ ...local, ...result.license, lastVerified: new Date().toISOString() })
+      // Start periodic session checks
+      startSessionCheck()
       return { valid: true, license: result.license }
     } else {
-      if (result.expired) { clearLicense(); return { valid: false, reason: 'expired', error: result.error } }
+      if (result.expired) {
+        clearLicense()
+        return {
+          valid: false,
+          reason: 'expired',
+          error: result.error || 'Your license key has expired. Please enter a valid key to continue.'
+        }
+      }
       clearLicense()
       return { valid: false, reason: 'invalid', error: result.error }
     }
   } catch (err) {
+    // Offline grace period — 24 hours
     if (local.lastVerified) {
       const hoursSince = (Date.now() - new Date(local.lastVerified).getTime()) / (1000 * 60 * 60)
-      if (hoursSince <= 24) return { valid: true, license: local, offline: true }
+      if (hoursSince <= 24) {
+        startSessionCheck()
+        return { valid: true, license: local, offline: true }
+      }
     }
-    return { valid: false, reason: 'offline', error: 'Cannot verify license. Error: ' + err.message }
+    return {
+      valid: false,
+      reason: 'offline',
+      error: 'Cannot verify license. Please check your internet connection.'
+    }
   }
 }
 
+// ── ACTIVATE LICENSE ─────────────────────────────────────────────
 async function activateLicense(licenseKey) {
   const hardwareId  = getHardwareId()
   const machineName = os.hostname()
 
   try {
     const result = await httpPost('/api/activate', { licenseKey, hardwareId, machineName })
+
     if (result.success) {
       saveLicense({
         key: licenseKey.trim().toUpperCase(),
@@ -142,6 +227,7 @@ async function activateLicense(licenseKey) {
         hardwareId,
         lastVerified: new Date().toISOString()
       })
+      startSessionCheck()
       return { success: true, license: result.license }
     }
     return { success: false, error: result.error }
@@ -150,16 +236,14 @@ async function activateLicense(licenseKey) {
   }
 }
 
+// ── IPC HANDLERS ─────────────────────────────────────────────────
 function registerLicenseHandlers() {
   ipcMain.handle('license:check',         () => checkLicense())
   ipcMain.handle('license:activate',      (_, key) => activateLicense(key))
-  ipcMain.handle('license:clear',         () => { clearLicense(); return { success: true } })
+  ipcMain.handle('license:clear',         () => { clearLicense(); stopSessionCheck(); return { success: true } })
   ipcMain.handle('license:getInfo',       () => loadLicense())
   ipcMain.handle('license:getHardwareId', () => getHardwareId())
-  ipcMain.handle('license:saveActivation', (_, key, license, hardwareId) => {
-    saveLicense({ key, ...license, hardwareId, lastVerified: new Date().toISOString() })
-    return { success: true }
-  })
+  ipcMain.handle('license:validateNow',   () => validateSession())
 }
 
-module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId }
+module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }
