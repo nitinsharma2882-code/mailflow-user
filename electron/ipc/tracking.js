@@ -116,7 +116,12 @@ async function recordOpen(jobId) {
 }
 
 function getTrackingUrl() {
-  return `http://localhost:${PORT}`
+  // Use Railway tracking server if configured, else fallback to local
+  return process.env.TRACKING_SERVER_URL || global.TRACKING_SERVER_URL || `http://localhost:${PORT}`
+}
+
+function setTrackingServerUrl(url) {
+  global.TRACKING_SERVER_URL = url
 }
 
 function stopTrackingServer() {
@@ -126,4 +131,4 @@ function stopTrackingServer() {
   }
 }
 
-module.exports = { startTrackingServer, stopTrackingServer, getTrackingUrl }
+module.exports = { startTrackingServer, stopTrackingServer, getTrackingUrl, setTrackingServerUrl }

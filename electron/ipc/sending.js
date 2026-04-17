@@ -5,6 +5,38 @@ const db = require('../../database/db')
 const { getSmtpConfig, isQuotaError } = require('./customSmtp')
 const { getTrackingUrl } = require('./tracking')
 
+// Railway tracking server — set this after deploying
+const RAILWAY_TRACKING_URL = 'https://mailflow-tracking-server-production.up.railway.app'
+const TRACKING_ADMIN_KEY   = 'mailflow-admin-2026'
+
+async function registerJobsWithTrackingServer(jobs) {
+  try {
+    const url = RAILWAY_TRACKING_URL
+    if (!url || url.includes('localhost')) return // skip if not configured
+
+    const payload = jobs.map(j => ({ id: j.id, campaignId: j.campaign_id, email: j.email }))
+
+    const res = await fetch(`${url}/api/jobs/register`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': TRACKING_ADMIN_KEY },
+      body:    JSON.stringify({ jobs: payload }),
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      console.log(`[Tracking] Registered ${data.registered} jobs with Railway server`)
+    }
+  } catch (err) {
+    console.log('[Tracking] Could not register jobs with Railway server:', err.message)
+    // Non-fatal — tracking just won't work for this campaign
+  }
+}
+
+function getActiveTrackingUrl() {
+  // Use Railway if available, else local
+  return RAILWAY_TRACKING_URL || getTrackingUrl()
+}
+
 const runningCampaigns = new Map()
 
 // ── SMTP Rotation Manager with Rate Limiting ─────────────────────────────────
@@ -317,6 +349,10 @@ async function startCampaign(campaignId) {
   const jobCount = database.prepare(`SELECT COUNT(*) as cnt FROM email_jobs WHERE campaign_id=?`).get(campaignId)
   console.log(`[Mailflow] Created ${jobCount.cnt} email jobs for campaign`)
 
+  // Register all jobs with Railway tracking server (non-blocking)
+  const allJobs = database.prepare(`SELECT id, campaign_id, email FROM email_jobs WHERE campaign_id=?`).all(campaignId)
+  registerJobsWithTrackingServer(allJobs).catch(() => {})
+
   database.prepare(`
     UPDATE campaigns SET status='running', started_at=datetime('now'),
     total_recipients=?, sent_count=0, failed_count=0 WHERE id=?
@@ -433,8 +469,8 @@ async function processBatch(campaignId) {
             templateAttachments = JSON.parse(state.campaign.attachments || '[]')
           } catch {}
 
-          // Inject open tracking pixel with local tracking server URL
-          const trackedHtml = injectTrackingPixel(html, job.id, getTrackingUrl())
+          // Inject open tracking pixel — use Railway URL so it works from recipient's device
+          const trackedHtml = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
 
           await deliverEmail(smtpEntry.server, {
             to:          job.email,

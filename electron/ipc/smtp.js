@@ -150,31 +150,54 @@ function registerAnalyticsHandlers() {
     return campaigns
   })
 
-  ipcMain.handle('analytics:openers', (_, campaignId) => {
+  ipcMain.handle('analytics:openers', async (_, campaignId) => {
     const database = db.get()
-    // Get all unique emails that opened this campaign
-    const openers = database.prepare(`
-      SELECT DISTINCT
-        json_extract(te.metadata, '$.email') as email,
-        te.created_at as opened_at,
-        j.id as job_id
-      FROM tracking_events te
-      LEFT JOIN email_jobs j ON te.job_id = j.id
-      WHERE te.campaign_id = ? AND te.type = 'open'
-      ORDER BY te.created_at DESC
-    `).all(campaignId)
 
     const campaign = database.prepare(
       'SELECT sent_count, open_count, total_recipients FROM campaigns WHERE id = ?'
     ).get(campaignId)
 
+    // Try Railway tracking server first
+    const RAILWAY_URL  = 'https://mailflow-tracking-server-production.up.railway.app'
+    const ADMIN_KEY    = 'mailflow-admin-2026'
+    let openers = []
+    let openCount = campaign?.open_count || 0
+
+    try {
+      const res = await fetch(`${RAILWAY_URL}/api/campaign/${campaignId}/openers`, {
+        headers: { 'x-admin-key': ADMIN_KEY }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        openers   = data.openers || []
+        openCount = data.openCount || openCount
+
+        // Sync open_count back to local DB
+        if (openCount > (campaign?.open_count || 0)) {
+          database.prepare('UPDATE campaigns SET open_count = ? WHERE id = ?').run(openCount, campaignId)
+        }
+        console.log(`[Analytics] Got ${openers.length} openers from Railway for campaign ${campaignId}`)
+      }
+    } catch (err) {
+      console.log('[Analytics] Railway unreachable, using local DB:', err.message)
+      // Fallback to local tracking_events
+      openers = database.prepare(`
+        SELECT DISTINCT
+          json_extract(te.metadata, '$.email') as email,
+          te.created_at as opened_at
+        FROM tracking_events te
+        WHERE te.campaign_id = ? AND te.type = 'open'
+        ORDER BY te.created_at DESC
+      `).all(campaignId)
+    }
+
     return {
       openers,
       total:     campaign?.total_recipients || 0,
       sent:      campaign?.sent_count || 0,
-      openCount: campaign?.open_count || 0,
+      openCount,
       openRate:  campaign?.sent_count > 0
-        ? ((campaign.open_count / campaign.sent_count) * 100).toFixed(1)
+        ? ((openCount / campaign.sent_count) * 100).toFixed(1)
         : '0.0'
     }
   })
