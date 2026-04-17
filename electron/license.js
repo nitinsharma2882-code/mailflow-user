@@ -63,10 +63,25 @@ function clearLicense() {
 
 function httpPost(endpoint, body) {
   return new Promise((resolve, reject) => {
-    const url  = `${LICENSE_SERVER}${endpoint}`
-    const data = JSON.stringify(body)
+    const fullUrl = `${LICENSE_SERVER}${endpoint}`
+    const data    = JSON.stringify(body)
 
-    const request = net.request({ method: 'POST', url })
+    // Parse URL properly for Electron's net module
+    let parsedUrl
+    try {
+      parsedUrl = new URL(fullUrl)
+    } catch (e) {
+      return reject(new Error('Invalid license server URL: ' + fullUrl))
+    }
+
+    const request = net.request({
+      method:   'POST',
+      protocol: parsedUrl.protocol,
+      hostname: parsedUrl.hostname,
+      port:     parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+      path:     parsedUrl.pathname + parsedUrl.search,
+    })
+
     request.setHeader('Content-Type', 'application/json')
     request.setHeader('Content-Length', Buffer.byteLength(data))
 
@@ -75,10 +90,14 @@ function httpPost(endpoint, body) {
       response.on('data', (chunk) => { responseBody += chunk.toString() })
       response.on('end', () => {
         try { resolve(JSON.parse(responseBody)) }
-        catch (e) { reject(new Error('Invalid server response')) }
+        catch (e) { reject(new Error('Invalid server response: ' + responseBody.substring(0, 100))) }
       })
     })
     request.on('error', (err) => reject(new Error('Network error: ' + err.message)))
+    request.setTimeout(15000, () => {
+      request.abort()
+      reject(new Error('Request timeout — check your internet connection'))
+    })
     request.write(data)
     request.end()
   })
