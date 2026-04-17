@@ -1,14 +1,16 @@
-const { app, ipcMain, net, BrowserWindow } = require('electron')
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+const { app, ipcMain, BrowserWindow } = require('electron')
 const crypto = require('crypto')
 const os     = require('os')
 const path   = require('path')
 const fs     = require('fs')
+const https  = require('https')
 
-const LICENSE_SERVER = process.env.LICENSE_SERVER_URL || 'https://mailflow-license-server-production.up.railway.app'
+// Disable TLS verification for Railway
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+
+const LICENSE_SERVER = 'https://mailflow-license-server-production.up.railway.app'
 const LICENSE_FILE   = path.join(app ? app.getPath('userData') : '.', 'license.dat')
 
-// Session check interval — every 30 minutes
 const SESSION_CHECK_INTERVAL = 30 * 60 * 1000
 let sessionCheckTimer = null
 
@@ -17,7 +19,7 @@ function getHardwareId() {
     os.hostname(),
     os.platform(),
     os.arch(),
-    os.cpus()[0]?.model || '',
+    os.cpus()[0] ? os.cpus()[0].model : '',
     os.totalmem().toString(),
   ].join('|')
   return crypto.createHash('sha256').update(data).digest('hex').substring(0, 32)
@@ -37,13 +39,13 @@ function encryptData(data) {
 
 function decryptData(encrypted) {
   try {
-    const [ivHex, data] = encrypted.split(':')
-    const iv = Buffer.from(ivHex, 'hex')
+    const parts = encrypted.split(':')
+    const iv = Buffer.from(parts[0], 'hex')
     const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPT_KEY, iv)
-    let dec = decipher.update(data, 'hex', 'utf8')
+    let dec = decipher.update(parts[1], 'hex', 'utf8')
     dec += decipher.final('utf8')
     return JSON.parse(dec)
-  } catch { return null }
+  } catch (e) { return null }
 }
 
 function saveLicense(data) {
@@ -54,119 +56,105 @@ function loadLicense() {
   try {
     if (!fs.existsSync(LICENSE_FILE)) return null
     return decryptData(fs.readFileSync(LICENSE_FILE, 'utf8'))
-  } catch { return null }
+  } catch (e) { return null }
 }
 
 function clearLicense() {
-  try { fs.unlinkSync(LICENSE_FILE) } catch {}
+  try { fs.unlinkSync(LICENSE_FILE) } catch (e) {}
 }
 
+// Simple HTTPS POST using Node's built-in https module
 function httpPost(endpoint, body) {
-  return new Promise((resolve, reject) => {
-    const fullUrl = `${LICENSE_SERVER}${endpoint}`
-    const data    = JSON.stringify(body)
+  return new Promise(function(resolve, reject) {
+    const postData = JSON.stringify(body)
+    const options = {
+      hostname: 'mailflow-license-server-production.up.railway.app',
+      port: 443,
+      path: endpoint,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      rejectUnauthorized: false
+    }
 
-    // Parse URL manually — avoids obfuscation issues with URL constructor
-    const isHttps   = fullUrl.startsWith('https://')
-    const protocol  = isHttps ? 'https:' : 'http:'
-    const withoutProto = fullUrl.replace(/^https?:\/\//, '')
-    const slashIdx  = withoutProto.indexOf('/')
-    const hostPart  = slashIdx === -1 ? withoutProto : withoutProto.substring(0, slashIdx)
-    const urlPath   = slashIdx === -1 ? '/' : withoutProto.substring(slashIdx)
-    const colonIdx  = hostPart.indexOf(':')
-    const hostname  = colonIdx === -1 ? hostPart : hostPart.substring(0, colonIdx)
-    const port      = colonIdx === -1 ? (isHttps ? 443 : 80) : parseInt(hostPart.substring(colonIdx + 1))
-
-    const request = net.request({
-      method:   'POST',
-      protocol: protocol,
-      hostname: hostname,
-      port:     port,
-      path:     urlPath,
-    })
-
-    request.setHeader('Content-Type', 'application/json')
-    request.setHeader('Content-Length', Buffer.byteLength(data))
-
-    let responseBody = ''
-    request.on('response', (response) => {
-      response.on('data', (chunk) => { responseBody += chunk.toString() })
-      response.on('end', () => {
-        try { resolve(JSON.parse(responseBody)) }
-        catch (e) { reject(new Error('Invalid server response: ' + responseBody.substring(0, 100))) }
+    const req = https.request(options, function(res) {
+      let data = ''
+      res.on('data', function(chunk) { data += chunk })
+      res.on('end', function() {
+        try {
+          resolve(JSON.parse(data))
+        } catch (e) {
+          reject(new Error('Invalid response from server'))
+        }
       })
     })
-    request.on('error', (err) => reject(new Error('Network error: ' + err.message)))
-    request.setTimeout(15000, () => {
-      request.abort()
-      reject(new Error('Request timeout — check your internet connection'))
+
+    req.on('error', function(err) {
+      reject(new Error('Connection failed: ' + err.message))
     })
-    request.write(data)
-    request.end()
+
+    req.setTimeout(15000, function() {
+      req.destroy()
+      reject(new Error('Connection timeout — check your internet'))
+    })
+
+    req.write(postData)
+    req.end()
   })
 }
 
-// ── SESSION VALIDATION — runs periodically while app is open ─────
 async function validateSession() {
   const local = loadLicense()
-  if (!local?.key) return
+  if (!local || !local.key) return
 
   try {
     const hardwareId = getHardwareId()
     const result = await httpPost('/api/session/validate', {
       licenseKey: local.key,
-      hardwareId
+      hardwareId: hardwareId
     })
 
     if (!result.valid) {
-      // License expired or revoked during session
       clearLicense()
       stopSessionCheck()
-
-      // Notify all windows
-      BrowserWindow.getAllWindows().forEach(w => {
+      BrowserWindow.getAllWindows().forEach(function(w) {
         try {
           w.webContents.send('license:expired', {
             reason: result.reason,
-            error:  result.error || 'Your license key has expired. Please enter a valid key to continue.'
+            error: result.error || 'Your license key has expired. Please enter a valid key to continue.'
           })
-        } catch {}
+        } catch (e) {}
       })
-
-      console.log(`[License] Session invalid: ${result.reason}`)
       return
     }
 
-    // Warn if expiring soon
     if (result.expiringSoon && result.daysRemaining !== null) {
-      BrowserWindow.getAllWindows().forEach(w => {
+      BrowserWindow.getAllWindows().forEach(function(w) {
         try {
           w.webContents.send('license:expiringSoon', {
             daysRemaining: result.daysRemaining,
-            expiresAt:     result.expiresAt
+            expiresAt: result.expiresAt
           })
-        } catch {}
+        } catch (e) {}
       })
     }
 
-    // Update local cache
-    saveLicense({
-      ...local,
-      expiresAt:     result.expiresAt,
+    saveLicense(Object.assign({}, local, {
+      expiresAt: result.expiresAt,
       daysRemaining: result.daysRemaining,
-      lastVerified:  new Date().toISOString()
-    })
+      lastVerified: new Date().toISOString()
+    }))
 
   } catch (err) {
-    console.log('[License] Session check failed (offline):', err.message)
-    // Don't invalidate — user might be offline
+    console.log('[License] Session check failed:', err.message)
   }
 }
 
 function startSessionCheck() {
   stopSessionCheck()
-  // Check after 5 minutes first time, then every 30 min
-  setTimeout(() => {
+  setTimeout(function() {
     validateSession()
     sessionCheckTimer = setInterval(validateSession, SESSION_CHECK_INTERVAL)
   }, 5 * 60 * 1000)
@@ -179,14 +167,12 @@ function stopSessionCheck() {
   }
 }
 
-// ── CHECK LICENSE ON STARTUP ─────────────────────────────────────
 async function checkLicense() {
   const hardwareId = getHardwareId()
-  const local      = loadLicense()
+  const local = loadLicense()
 
-  if (!local?.key) return { valid: false, reason: 'no_license' }
+  if (!local || !local.key) return { valid: false, reason: 'no_license' }
 
-  // Local expiry check first (fast)
   if (local.expiresAt && new Date(local.expiresAt) < new Date()) {
     clearLicense()
     return {
@@ -198,11 +184,13 @@ async function checkLicense() {
   }
 
   try {
-    const result = await httpPost('/api/verify', { licenseKey: local.key, hardwareId })
+    const result = await httpPost('/api/verify', {
+      licenseKey: local.key,
+      hardwareId: hardwareId
+    })
 
     if (result.success) {
-      saveLicense({ ...local, ...result.license, lastVerified: new Date().toISOString() })
-      // Start periodic session checks
+      saveLicense(Object.assign({}, local, result.license, { lastVerified: new Date().toISOString() }))
       startSessionCheck()
       return { valid: true, license: result.license }
     } else {
@@ -218,7 +206,6 @@ async function checkLicense() {
       return { valid: false, reason: 'invalid', error: result.error }
     }
   } catch (err) {
-    // Offline grace period — 24 hours
     if (local.lastVerified) {
       const hoursSince = (Date.now() - new Date(local.lastVerified).getTime()) / (1000 * 60 * 60)
       if (hoursSince <= 24) {
@@ -229,26 +216,28 @@ async function checkLicense() {
     return {
       valid: false,
       reason: 'offline',
-      error: 'Cannot verify license. Please check your internet connection.'
+      error: 'Cannot connect to license server. Check your internet connection.'
     }
   }
 }
 
-// ── ACTIVATE LICENSE ─────────────────────────────────────────────
 async function activateLicense(licenseKey) {
   const hardwareId  = getHardwareId()
   const machineName = os.hostname()
 
   try {
-    const result = await httpPost('/api/activate', { licenseKey, hardwareId, machineName })
+    const result = await httpPost('/api/activate', {
+      licenseKey: licenseKey,
+      hardwareId: hardwareId,
+      machineName: machineName
+    })
 
     if (result.success) {
-      saveLicense({
+      saveLicense(Object.assign({
         key: licenseKey.trim().toUpperCase(),
-        ...result.license,
-        hardwareId,
+        hardwareId: hardwareId,
         lastVerified: new Date().toISOString()
-      })
+      }, result.license))
       startSessionCheck()
       return { success: true, license: result.license }
     }
@@ -258,14 +247,13 @@ async function activateLicense(licenseKey) {
   }
 }
 
-// ── IPC HANDLERS ─────────────────────────────────────────────────
 function registerLicenseHandlers() {
-  ipcMain.handle('license:check',         () => checkLicense())
-  ipcMain.handle('license:activate',      (_, key) => activateLicense(key))
-  ipcMain.handle('license:clear',         () => { clearLicense(); stopSessionCheck(); return { success: true } })
-  ipcMain.handle('license:getInfo',       () => loadLicense())
-  ipcMain.handle('license:getHardwareId', () => getHardwareId())
-  ipcMain.handle('license:validateNow',   () => validateSession())
+  ipcMain.handle('license:check',         function() { return checkLicense() })
+  ipcMain.handle('license:activate',      function(_, key) { return activateLicense(key) })
+  ipcMain.handle('license:clear',         function() { clearLicense(); stopSessionCheck(); return { success: true } })
+  ipcMain.handle('license:getInfo',       function() { return loadLicense() })
+  ipcMain.handle('license:getHardwareId', function() { return getHardwareId() })
+  ipcMain.handle('license:validateNow',   function() { return validateSession() })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }

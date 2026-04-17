@@ -5,7 +5,7 @@ const path = require('path')
 const TARGETS = [
   'electron/main.js',
   'electron/preload.js',
-  'electron/license.js',
+  // license.js excluded — obfuscation breaks Electron net module
   'electron/ipc/campaigns.js',
   'electron/ipc/contacts.js',
   'electron/ipc/sending.js',
@@ -19,17 +19,15 @@ const TARGETS = [
 
 const OPTIONS = {
   compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.75,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.4,
+  controlFlowFlattening: false,  // disabled — breaks Electron APIs
+  deadCodeInjection: false,      // disabled — causes runtime errors
   debugProtection: false,
-  disableConsoleOutput: true,
+  disableConsoleOutput: false,
   identifierNamesGenerator: 'hexadecimal',
   log: false,
-  numbersToExpressions: true,
+  numbersToExpressions: false,
   renameGlobals: false,
-  selfDefending: true,
+  selfDefending: false,          // disabled — breaks in Electron context
   simplify: true,
   splitStrings: true,
   splitStringsChunkLength: 10,
@@ -44,7 +42,7 @@ const OPTIONS = {
   stringArrayWrappersParametersMaxCount: 4,
   stringArrayWrappersType: 'function',
   stringArrayThreshold: 0.75,
-  transformObjectKeys: true,
+  transformObjectKeys: false,    // disabled — breaks object destructuring
   unicodeEscapeSequence: false,
 }
 
