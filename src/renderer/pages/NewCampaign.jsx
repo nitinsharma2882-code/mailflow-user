@@ -633,66 +633,88 @@ export default function NewCampaign() {
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Preview & Send</div>
 
-          {/* Inbox-like email preview */}
+          {/* Full inbox-like email preview */}
           {previewTemplate && (
-            <div style={{ marginBottom: 20, border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden' }}>
-              {/* Email header — like real inbox */}
-              <div style={{ background: 'var(--bg3)', padding: '14px 18px', borderBottom: '1px solid var(--bdr)' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--txt)' }}>
+            <div style={{ marginBottom: 20, border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+
+              {/* Gmail-like header bar */}
+              <div style={{ background: '#f6f8fc', padding: '16px 20px', borderBottom: '1px solid #e0e0e0' }}>
+                {/* Subject */}
+                <div style={{ fontSize: 18, fontWeight: 600, color: '#202124', marginBottom: 12 }}>
                   {previewTemplate.subject || '(No subject)'}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--txt3)', minWidth: 60 }}>From:</span>
-                    <span style={{ color: 'var(--txt)' }}>
-                      {previewTemplate.from_name || 'Mailflow'} &lt;{
-                        campaign.sending_mode === 'custom_smtp' && campaign.custom_smtp_list?.length > 0
+                {/* From/To/Date */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#4A3AFF',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#fff', fontSize: 16, fontWeight: 600, flexShrink: 0 }}>
+                    {(previewTemplate.from_name || 'M')[0].toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#202124' }}>
+                        {previewTemplate.from_name || 'Mailflow'}
+                      </span>
+                      <span style={{ fontSize: 12, color: '#5f6368' }}>{new Date().toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#5f6368' }}>
+                      from: <span style={{ color: '#202124' }}>
+                        {campaign.sending_mode === 'custom_smtp' && campaign.custom_smtp_list?.length > 0
                           ? campaign.custom_smtp_list[0]?.email
-                          : servers.find(s => campaign.server_ids.includes(s.id))?.from_email || 'sender@example.com'
-                      }&gt;
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--txt3)', minWidth: 60 }}>To:</span>
-                    <span style={{ color: 'var(--txt2)' }}>
-                      {selectedListInfo ? `${selectedListInfo.valid?.toLocaleString()} recipients` : 'Recipients'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--txt3)', minWidth: 60 }}>Date:</span>
-                    <span style={{ color: 'var(--txt2)' }}>{new Date().toLocaleString()}</span>
+                          : servers.find(s => campaign.server_ids.includes(s.id))?.from_email || 'sender@example.com'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#5f6368' }}>
+                      to: <span style={{ color: '#202124' }}>
+                        {selectedListInfo ? `${selectedListInfo.valid?.toLocaleString()} recipients` : 'recipients'}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Email body — full HTML render */}
-              <div style={{ background: '#ffffff', padding: '20px', maxHeight: 400, overflowY: 'auto' }}>
-                <div style={{ fontSize: 13, lineHeight: 1.7, color: '#000' }}
-                  dangerouslySetInnerHTML={{ __html: previewTemplate.html_body }} />
+              {/* Email body rendered in iframe — exact real email view */}
+              <div style={{ background: '#ffffff', position: 'relative' }}>
+                <iframe
+                  srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:20px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#202124;}img{max-width:100%;height:auto;}a{color:#1a73e8;}</style></head><body>${previewTemplate.html_body || ''}</body></html>`}
+                  style={{ width: '100%', minHeight: 300, border: 'none', display: 'block' }}
+                  onLoad={e => {
+                    try {
+                      const h = e.target.contentDocument.body.scrollHeight
+                      e.target.style.height = Math.min(Math.max(h + 40, 300), 600) + 'px'
+                    } catch {}
+                  }}
+                  sandbox="allow-same-origin"
+                  title="Email Preview"
+                />
               </div>
 
-              {/* Attachments section */}
+              {/* Attachments */}
               {(() => {
-                const atts = (() => { try { return JSON.parse(selectedTemplate.attachments || '[]') } catch { return [] } })()
+                const atts = (() => { try { return JSON.parse(previewTemplate.attachments || '[]') } catch { return [] } })()
                 if (atts.length === 0) return null
                 return (
-                  <div style={{ background: 'var(--bg2)', borderTop: '1px solid var(--bdr)', padding: '12px 18px' }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', marginBottom: 8 }}>
-                      📎 Attachments ({atts.length})
+                  <div style={{ background: '#f6f8fc', borderTop: '1px solid #e0e0e0', padding: '12px 20px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#5f6368', marginBottom: 8 }}>
+                      📎 {atts.length} Attachment{atts.length > 1 ? 's' : ''}
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {atts.map((att, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6,
-                          padding: '6px 10px', background: 'var(--bg3)', border: '1px solid var(--bdr)',
-                          borderRadius: 'var(--rad)', fontSize: 12 }}>
-                          <span>{att.type?.startsWith('image/') ? '🖼' : att.type === 'application/pdf' ? '📕' : att.type?.startsWith('video/') ? '🎬' : '📄'}</span>
-                          <span style={{ fontWeight: 500 }}>{att.name}</span>
-                          <span style={{ color: 'var(--txt3)', fontSize: 11 }}>
-                            {att.size < 1024*1024 ? (att.size/1024).toFixed(1)+'KB' : (att.size/(1024*1024)).toFixed(1)+'MB'}
+                          padding: '8px 12px', background: '#fff',
+                          border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 12 }}>
+                          <span style={{ fontSize: 20 }}>
+                            {att.type?.startsWith('image/') ? '🖼' : att.type === 'application/pdf' ? '📕' : att.type?.startsWith('video/') ? '🎬' : '📄'}
                           </span>
+                          <div>
+                            <div style={{ fontWeight: 500, color: '#202124' }}>{att.name}</div>
+                            <div style={{ fontSize: 11, color: '#5f6368' }}>
+                              {att.size < 1024*1024 ? (att.size/1024).toFixed(1)+' KB' : (att.size/(1024*1024)).toFixed(1)+' MB'}
+                            </div>
+                          </div>
                           {att.type?.startsWith('image/') && att.dataUrl && (
                             <img src={att.dataUrl} alt={att.name}
-                              style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 3, border: '1px solid var(--bdr)' }} />
+                              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid #e0e0e0', marginLeft: 4 }} />
                           )}
                         </div>
                       ))}
