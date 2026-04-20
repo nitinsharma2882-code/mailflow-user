@@ -595,9 +595,11 @@ async function processAttachments(attachments) {
 }
 
 async function sendViaSes(server, mailOptions) {
-  const { SESClient, SendRawEmailCommand } = require('@aws-sdk/client-ses')
+  var SESModule = require('@aws-sdk/client-ses')
+  var SESClient = SESModule.SESClient
+  var SendRawEmailCommand = SESModule.SendRawEmailCommand
 
-  const client = new SESClient({
+  var client = new SESClient({
     region: server.region || 'us-east-1',
     credentials: {
       accessKeyId:     (server.api_key || '').trim(),
@@ -605,69 +607,55 @@ async function sendViaSes(server, mailOptions) {
     }
   })
 
-  const attachments = mailOptions.attachments || []
-  const boundary    = `mailflow_${Date.now()}_${Math.random().toString(36).substring(2)}`
+  var atts = mailOptions.attachments || []
+  var CRLF = '\r\n'
+  var b  = 'mlfw' + Date.now()
+  var ba = b + 'alt'
 
-  // Build MIME message
-  let raw = [
-    `From: ${mailOptions.from}`,
-    `To: ${mailOptions.to}`,
-    `Subject: ${mailOptions.subject}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    '',
-    `--${boundary}`,
-    `Content-Type: multipart/alternative; boundary="${boundary}_alt"`,
-    '',
-    `--${boundary}_alt`,
-    `Content-Type: text/plain; charset=UTF-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    '',
-    mailOptions.text || '',
-    '',
-    `--${boundary}_alt`,
-    `Content-Type: text/html; charset=UTF-8`,
-    `Content-Transfer-Encoding: quoted-printable`,
-    '',
-    mailOptions.html || '',
-    '',
-    `--${boundary}_alt--`,
-  ].join('
-')
+  var raw = ''
+  raw += 'From: ' + mailOptions.from + CRLF
+  raw += 'To: ' + mailOptions.to + CRLF
+  raw += 'Subject: ' + mailOptions.subject + CRLF
+  raw += 'MIME-Version: 1.0' + CRLF
+  raw += 'Content-Type: multipart/mixed; boundary="' + b + '"' + CRLF
+  raw += CRLF
+  raw += '--' + b + CRLF
+  raw += 'Content-Type: multipart/alternative; boundary="' + ba + '"' + CRLF
+  raw += CRLF
+  raw += '--' + ba + CRLF
+  raw += 'Content-Type: text/plain; charset=UTF-8' + CRLF
+  raw += CRLF
+  raw += (mailOptions.text || '') + CRLF
+  raw += CRLF
+  raw += '--' + ba + CRLF
+  raw += 'Content-Type: text/html; charset=UTF-8' + CRLF
+  raw += CRLF
+  raw += (mailOptions.html || '') + CRLF
+  raw += CRLF
+  raw += '--' + ba + '--' + CRLF
 
-  // Add attachments
-  for (const att of attachments) {
+  for (var i = 0; i < atts.length; i++) {
+    var att = atts[i]
     if (!att.content) continue
-    const content = typeof att.content === 'string' ? att.content : att.content.toString('base64')
-    raw += [
-      '',
-      `--${boundary}`,
-      `Content-Type: ${att.contentType || 'application/octet-stream'}; name="${att.filename}"`,
-      `Content-Transfer-Encoding: base64`,
-      `Content-Disposition: attachment; filename="${att.filename}"`,
-      '',
-      content,
-    ].join('
-')
+    var ac = typeof att.content === 'string' ? att.content : att.content.toString('base64')
+    raw += '--' + b + CRLF
+    raw += 'Content-Type: ' + (att.contentType || 'application/octet-stream') + '; name="' + att.filename + '"' + CRLF
+    raw += 'Content-Transfer-Encoding: base64' + CRLF
+    raw += 'Content-Disposition: attachment; filename="' + att.filename + '"' + CRLF
+    raw += CRLF
+    raw += ac + CRLF
   }
 
-  raw += `
---${boundary}--`
+  raw += '--' + b + '--'
 
-  const command = new SendRawEmailCommand({
-    RawMessage: { Data: Buffer.from(raw) }
-  })
+  var cmd = new SendRawEmailCommand({ RawMessage: { Data: Buffer.from(raw) } })
 
   try {
-    const result = await client.send(command)
-    return result
+    return await client.send(cmd)
   } catch (err) {
-    // Parse SES specific errors
-    if (err.name === 'MessageRejected') throw new Error('SES: Message rejected — check sender email is verified')
-    if (err.name === 'MailFromDomainNotVerifiedException') throw new Error('SES: Sender domain not verified in AWS')
+    if (err.name === 'MessageRejected') throw new Error('SES: Message rejected — verify sender email in AWS')
+    if (err.name === 'ThrottlingException') throw new Error('SES: Rate limit exceeded')
     if (err.name === 'SendingPausedException') throw new Error('SES: Sending paused — check AWS console')
-    if (err.name === 'AccountSendingPausedException') throw new Error('SES: Account sending paused — check AWS console')
-    if (err.name === 'ThrottlingException') throw new Error('SES: Rate limit exceeded — slow down sending')
     throw err
   }
 }
@@ -688,7 +676,19 @@ async function deliverEmail(server, mailOptions) {
 
     // Process and attach files if any
     const attachments = await processAttachments(mailOptions.attachments || [])
-    const finalOptions = { ...mailOptions }
+    const finalOptions = {
+      ...mailOptions,
+      // Deliverability headers — missing these = spam signal
+      headers: {
+        'X-Mailer':           'Mailflow/1.0',
+        'X-Priority':         '3',
+        'Message-ID':         mailOptions.messageId || ('<' + Date.now() + '@mailflow.app>'),
+        'X-Entity-Ref-ID':    require('crypto').randomBytes(16).toString('hex'),
+        'List-Unsubscribe':   '<mailto:unsubscribe@mailflow.app>',
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'Precedence':         'bulk',
+      }
+    }
     if (attachments.length > 0) finalOptions.attachments = attachments
     else delete finalOptions.attachments
 
@@ -722,6 +722,97 @@ async function deliverEmail(server, mailOptions) {
 function mergeTemplate(template, data) {
   if (!template) return ''
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => data[key] || '')
+}
+
+// ── DELIVERABILITY ENGINE ─────────────────────────────────────────
+// Makes emails look human-written and bypass spam filters
+
+function generateTextVersion(html) {
+  // Convert HTML to clean plain text — required for spam filters
+  if (!html) return ''
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function humanizeHtml(html, recipientData) {
+  if (!html) return html
+
+  // 1. Add subtle random whitespace variations (looks human-typed)
+  var spaces = [' ', '  ', ' ']
+  html = html.replace(/(<\/p>)/g, function() {
+    return spaces[Math.floor(Math.random() * spaces.length)] + '</p>'
+  })
+
+  // 2. Add invisible zero-width characters to break pattern matching
+  // (bypasses template fingerprinting used by spam filters)
+  var zwChars = ['\u200B', '\u200C', '\u200D', '\uFEFF']
+  var insertCount = 0
+  html = html.replace(/(\s{2,})/g, function(match) {
+    if (insertCount < 5) {
+      insertCount++
+      return match + zwChars[Math.floor(Math.random() * zwChars.length)]
+    }
+    return match
+  })
+
+  // 3. Add recipient-specific hidden element (unique per email — bypasses duplicate content detection)
+  var uniqueId = 'u' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)
+  var hiddenEl = '<div style="display:none;font-size:1px;color:#ffffff;max-height:0;max-width:0;opacity:0;overflow:hidden;">' + uniqueId + '</div>'
+
+  if (html.includes('<body')) {
+    html = html.replace('<body', hiddenEl + '<body')
+  } else {
+    html = hiddenEl + html
+  }
+
+  // 4. Add proper email structure if missing
+  if (!html.includes('<!DOCTYPE') && !html.includes('<html')) {
+    html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head><body>' + html + '</body></html>'
+  }
+
+  // 5. Add unsubscribe link at bottom (required by CAN-SPAM — missing this causes spam)
+  var email = recipientData && recipientData.email ? recipientData.email : ''
+  var unsubLink = '<div style="text-align:center;margin-top:20px;padding:10px;font-size:11px;color:#888888;font-family:Arial,sans-serif;">' +
+    'You are receiving this email because you signed up for our service. ' +
+    '<br>To unsubscribe, reply with "unsubscribe" in the subject line.' +
+    '</div>'
+
+  if (html.includes('</body>')) {
+    html = html.replace('</body>', unsubLink + '</body>')
+  } else {
+    html = html + unsubLink
+  }
+
+  return html
+}
+
+function humanizeSubject(subject) {
+  if (!subject) return subject
+  // Add minor randomization to avoid subject line fingerprinting
+  // Spam filters flag identical subjects sent to many people
+  var variants = ['', ' ', '  ']
+  return subject + variants[Math.floor(Math.random() * variants.length)]
+}
+
+function buildMessageId(fromEmail) {
+  // Proper Message-ID header — missing this is a spam signal
+  var domain = fromEmail && fromEmail.includes('@') ? fromEmail.split('@')[1] : 'mailflow.app'
+  return '<' + Date.now().toString(36) + '.' + Math.random().toString(36).substring(2) + '@' + domain + '>'
 }
 
 function injectTrackingPixel(html, jobId, trackingDomain) {

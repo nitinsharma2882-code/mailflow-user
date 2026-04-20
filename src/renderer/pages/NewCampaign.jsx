@@ -795,6 +795,70 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
   const [attachments, setAttachments] = useState([]) // { name, path, size, type, dataUrl }
 
   const selected = templates.find(t => t.id === campaign.template_id)
+  const [selectedStarter, setSelectedStarter] = React.useState('')
+
+  const STARTER_TEMPLATES = {
+    receipt: {
+      name: 'Payment Receipt',
+      subject: 'Your payment receipt - Order #{{name}}',
+      from_name: 'Billing Team',
+      html_body: `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<style>
+  body{margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;}
+  .wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+  .header{background:#1a73e8;padding:28px 32px;text-align:center;}
+  .header h1{color:#fff;margin:0;font-size:22px;font-weight:600;}
+  .body{padding:32px;}
+  .greeting{font-size:16px;color:#202124;margin-bottom:20px;}
+  .receipt-box{background:#f8f9fa;border:1px solid #e0e0e0;border-radius:6px;padding:20px;margin:20px 0;}
+  .receipt-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:14px;color:#444;}
+  .receipt-row:last-child{border-bottom:none;font-weight:700;color:#202124;font-size:15px;}
+  .receipt-label{color:#666;}
+  .status-badge{display:inline-block;background:#e6f4ea;color:#1e7e34;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;}
+  .footer{background:#f8f9fa;padding:20px 32px;text-align:center;font-size:12px;color:#888;border-top:1px solid #e0e0e0;}
+  .btn{display:inline-block;background:#1a73e8;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;margin:16px 0;}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>Payment Receipt</h1>
+  </div>
+  <div class="body">
+    <p class="greeting">Hi {{name}},</p>
+    <p style="color:#444;font-size:14px;">Thank you for your payment. Your transaction was successful. Here are your receipt details:</p>
+    <div class="receipt-box">
+      <div class="receipt-row"><span class="receipt-label">Order ID</span><span>#{{name}}</span></div>
+      <div class="receipt-row"><span class="receipt-label">Date</span><span>{{email}}</span></div>
+      <div class="receipt-row"><span class="receipt-label">Status</span><span class="status-badge">✓ Paid</span></div>
+      <div class="receipt-row"><span class="receipt-label">Amount Paid</span><span>—</span></div>
+    </div>
+    <p style="font-size:14px;color:#444;">A copy of your receipt is attached to this email as a PDF.</p>
+    <center><a href="#" class="btn">View Receipt Online</a></center>
+    <p style="font-size:13px;color:#666;margin-top:20px;">If you have any questions about this transaction, please reply to this email or contact our support team.</p>
+    <p style="font-size:14px;color:#444;">Thank you for your business!</p>
+    <p style="font-size:14px;color:#444;">Best regards,<br><strong>The Billing Team</strong></p>
+  </div>
+  <div class="footer">
+    This is an automated payment receipt. Please keep it for your records.<br>
+    &copy; 2026 Your Company. All rights reserved.
+  </div>
+</div>
+</body></html>`
+    },
+    newsletter: {
+      name: 'Newsletter',
+      subject: 'Newsletter - {{name}}',
+      from_name: 'Newsletter Team',
+      html_body: `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;}.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;}.header{background:#7C3AED;padding:28px;text-align:center;color:#fff;}.body{padding:32px;font-size:14px;color:#444;line-height:1.6;}.footer{background:#f8f9fa;padding:16px;text-align:center;font-size:12px;color:#888;}</style></head><body><div class="wrap"><div class="header"><h1 style="margin:0;">{{name}}</h1><p style="margin:8px 0 0;opacity:0.9;">Your Monthly Newsletter</p></div><div class="body"><p>Hi {{name}},</p><p>Welcome to this month's newsletter! Here's what's new:</p><p>Your newsletter content goes here...</p><p>Best regards,<br><strong>The Team</strong></p></div><div class="footer">You received this because you subscribed to our newsletter.</div></div></body></html>`
+    },
+    promotional: {
+      name: 'Promotional Offer',
+      subject: 'Special offer for you, {{name}}!',
+      from_name: 'Special Offers',
+      html_body: `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;}.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;}.header{background:linear-gradient(135deg,#FF6B6B,#FF8E53);padding:40px;text-align:center;}.body{padding:32px;text-align:center;}.offer{background:#fff8e1;border:2px dashed #FFC107;border-radius:8px;padding:24px;margin:20px 0;}.btn{display:inline-block;background:#FF6B6B;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:700;font-size:15px;}.footer{padding:16px;text-align:center;font-size:12px;color:#888;}</style></head><body><div class="wrap"><div class="header"><h1 style="color:#fff;margin:0;">Special Offer!</h1><p style="color:#fff;opacity:0.9;">Exclusively for you, {{name}}</p></div><div class="body"><h2>Limited Time Deal</h2><div class="offer"><h3 style="color:#FF6B6B;margin:0 0 8px;">SAVE 30% TODAY</h3><p style="color:#666;margin:0;">Use code: SPECIAL30</p></div><p>Don't miss out on this exclusive offer!</p><a href="#" class="btn">Claim Your Discount</a></div><div class="footer">You're receiving this because you opted in to special offers.</div></div></body></html>`
+    }
+  }
 
   async function openEdit(t) {
     if (t) {
@@ -805,6 +869,7 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
     } else {
       setForm({ name: '', subject: '', from_name: '', html_body: '<p>Hi <strong>{{name}}</strong>,</p><br><p>Your message here.</p><br><p>Best,<br>The Team</p>' })
       setAttachments([])
+      setSelectedStarter('')
     }
     setEditing(t ? t.id : 'new')
   }
@@ -1170,9 +1235,36 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
           <div style={{ fontSize: 12, color: 'var(--txt2)', marginBottom: 16 }}>
             Build your email with HTML, add variables like {'{{name}}'}, attach files and preview before sending.
           </div>
-          <button onClick={() => openEdit(null)}
+            <div style={{ marginBottom: 16, width: '100%' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', marginBottom: 8 }}>Start with a template:</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+              {[
+                { key: 'receipt',     icon: '🧾', label: 'Payment Receipt', desc: 'Inbox-friendly receipt' },
+                { key: 'newsletter',  icon: '📰', label: 'Newsletter',       desc: 'Monthly newsletter' },
+                { key: 'promotional', icon: '🎯', label: 'Promotional',      desc: 'Special offers' },
+              ].map(t => (
+                <div key={t.key} onClick={() => setSelectedStarter(t.key)}
+                  style={{ padding: '12px', border: selectedStarter === t.key ? '2px solid var(--pu)' : '1px solid var(--bdr)',
+                    borderRadius: 'var(--rad)', cursor: 'pointer', textAlign: 'center',
+                    background: selectedStarter === t.key ? 'var(--pu-l)' : 'var(--bg2)' }}>
+                  <div style={{ fontSize: 24, marginBottom: 4 }}>{t.icon}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{t.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--txt3)' }}>{t.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <button onClick={() => {
+            if (selectedStarter && STARTER_TEMPLATES[selectedStarter]) {
+              const s = STARTER_TEMPLATES[selectedStarter]
+              openEdit(null)
+              setTimeout(() => setForm(f => ({ ...f, ...s })), 50)
+            } else {
+              openEdit(null)
+            }
+          }}
             style={{ padding: '10px 24px', background: 'var(--pu)', color: '#fff', border: 'none', borderRadius: 'var(--rad)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-            + Create New Template
+            + Create Template
           </button>
         </div>
       )}
