@@ -594,6 +594,84 @@ async function processAttachments(attachments) {
   return result
 }
 
+async function sendViaSes(server, mailOptions) {
+  const { SESClient, SendRawEmailCommand } = require('@aws-sdk/client-ses')
+
+  const client = new SESClient({
+    region: server.region || 'us-east-1',
+    credentials: {
+      accessKeyId:     (server.api_key || '').trim(),
+      secretAccessKey: (server.password || '').trim()
+    }
+  })
+
+  const attachments = mailOptions.attachments || []
+  const boundary    = `mailflow_${Date.now()}_${Math.random().toString(36).substring(2)}`
+
+  // Build MIME message
+  let raw = [
+    `From: ${mailOptions.from}`,
+    `To: ${mailOptions.to}`,
+    `Subject: ${mailOptions.subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    `Content-Type: multipart/alternative; boundary="${boundary}_alt"`,
+    '',
+    `--${boundary}_alt`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: quoted-printable`,
+    '',
+    mailOptions.text || '',
+    '',
+    `--${boundary}_alt`,
+    `Content-Type: text/html; charset=UTF-8`,
+    `Content-Transfer-Encoding: quoted-printable`,
+    '',
+    mailOptions.html || '',
+    '',
+    `--${boundary}_alt--`,
+  ].join('
+')
+
+  // Add attachments
+  for (const att of attachments) {
+    if (!att.content) continue
+    const content = typeof att.content === 'string' ? att.content : att.content.toString('base64')
+    raw += [
+      '',
+      `--${boundary}`,
+      `Content-Type: ${att.contentType || 'application/octet-stream'}; name="${att.filename}"`,
+      `Content-Transfer-Encoding: base64`,
+      `Content-Disposition: attachment; filename="${att.filename}"`,
+      '',
+      content,
+    ].join('
+')
+  }
+
+  raw += `
+--${boundary}--`
+
+  const command = new SendRawEmailCommand({
+    RawMessage: { Data: Buffer.from(raw) }
+  })
+
+  try {
+    const result = await client.send(command)
+    return result
+  } catch (err) {
+    // Parse SES specific errors
+    if (err.name === 'MessageRejected') throw new Error('SES: Message rejected — check sender email is verified')
+    if (err.name === 'MailFromDomainNotVerifiedException') throw new Error('SES: Sender domain not verified in AWS')
+    if (err.name === 'SendingPausedException') throw new Error('SES: Sending paused — check AWS console')
+    if (err.name === 'AccountSendingPausedException') throw new Error('SES: Account sending paused — check AWS console')
+    if (err.name === 'ThrottlingException') throw new Error('SES: Rate limit exceeded — slow down sending')
+    throw err
+  }
+}
+
 async function deliverEmail(server, mailOptions) {
   if (server.type === 'smtp') {
     const transporter = nodemailer.createTransport({
@@ -626,12 +704,7 @@ async function deliverEmail(server, mailOptions) {
       return sgMail.send(mailOptions)
     }
     if (server.provider === 'ses') {
-      const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses')
-      const client = new SESClient({ region: server.region || 'us-east-1', credentials: { accessKeyId: server.api_key, secretAccessKey: server.password } })
-      return client.send(new SendEmailCommand({
-        Source: mailOptions.from, Destination: { ToAddresses: [mailOptions.to] },
-        Message: { Subject: { Data: mailOptions.subject }, Body: { Html: { Data: mailOptions.html }, Text: { Data: mailOptions.text || '' } } }
-      }))
+      return await sendViaSes(server, mailOptions)
     }
     if (server.provider === 'mailgun') {
       const formData = require('form-data')

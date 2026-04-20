@@ -95,9 +95,11 @@ async function testSmtpConnection(config) {
         connectionTimeout: 8000,
         greetingTimeout: 5000,
       })
+    } else if (config.provider === 'ses') {
+      // Actually test SES credentials
+      return await testSesConnection(config)
     } else {
-      // For API providers, just verify credentials
-      return { success: true, latency: Date.now() - start, message: 'API credentials format valid — send test email to fully verify' }
+      return { success: true, latency: Date.now() - start, message: 'API credentials saved — send test email to fully verify' }
     }
 
     await transporter.verify()
@@ -127,4 +129,74 @@ function parseSmtpError(msg) {
   return msg
 }
 
-module.exports = { registerServerHandlers, testSmtpConnection }
+async function testSesConnection(config) {
+  const start = Date.now()
+  try {
+    const { SESClient, GetSendQuotaCommand, GetIdentityVerificationAttributesCommand } = require('@aws-sdk/client-ses')
+
+    if (!config.api_key || !config.password) {
+      return { success: false, message: 'Access Key ID and Secret Access Key are required' }
+    }
+
+    const client = new SESClient({
+      region: config.region || 'us-east-1',
+      credentials: {
+        accessKeyId:     config.api_key.trim(),
+        secretAccessKey: config.password.trim()
+      }
+    })
+
+    // Test 1: Check credentials and get quota
+    const quota = await client.send(new GetSendQuotaCommand({}))
+    const latency = Date.now() - start
+
+    // Test 2: Check if sender email is verified
+    if (config.from_email) {
+      const verifyResult = await client.send(new GetIdentityVerificationAttributesCommand({
+        Identities: [config.from_email]
+      }))
+      const attrs = verifyResult.VerificationAttributes || {}
+      const emailStatus = attrs[config.from_email]?.VerificationStatus
+
+      if (emailStatus !== 'Success') {
+        return {
+          success: false,
+          latency,
+          message: `Credentials valid BUT sender email "${config.from_email}" is NOT verified in SES. Please verify it in AWS Console first.`
+        }
+      }
+    }
+
+    return {
+      success: true,
+      latency,
+      message: `SES Connected! Daily quota: ${quota.Max24HourSend?.toLocaleString()} emails · Rate: ${quota.MaxSendRate}/sec`,
+      quota: {
+        max24Hour:   quota.Max24HourSend,
+        maxRate:     quota.MaxSendRate,
+        sentLast24h: quota.SentLast24Hours
+      }
+    }
+  } catch (err) {
+    const latency = Date.now() - start
+    let message = err.message
+    if (err.name === 'InvalidClientTokenId' || message.includes('invalid')) {
+      message = 'Invalid Access Key ID — check your AWS credentials'
+    } else if (err.name === 'SignatureDoesNotMatch' || message.includes('signature')) {
+      message = 'Invalid Secret Access Key — check your AWS credentials'
+    } else if (message.includes('region') || err.name === 'EndpointError') {
+      message = 'Invalid region — check your AWS region (e.g. us-east-1)'
+    } else if (message.includes('not authorized') || err.name === 'AccessDenied') {
+      message = 'Access denied — ensure IAM user has SES permissions (ses:SendEmail, ses:GetSendQuota)'
+    }
+    return { success: false, latency, message, error: err.name }
+  }
+}
+
+// Add SES test as separate IPC handler
+const { ipcMain: _ipc2 } = require('electron')
+_ipc2.handle('servers:testSes', async (_, config) => {
+  return testSesConnection(config)
+})
+
+module.exports = { registerServerHandlers, testSmtpConnection, testSesConnection }

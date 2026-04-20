@@ -81,20 +81,90 @@ export function Contacts() {
 }
 
 // ── Servers Page ────────────────────────────────────────────────────
+const SES_REGIONS = [
+  { value: 'us-east-1',      label: 'US East (N. Virginia)' },
+  { value: 'us-east-2',      label: 'US East (Ohio)' },
+  { value: 'us-west-1',      label: 'US West (N. California)' },
+  { value: 'us-west-2',      label: 'US West (Oregon)' },
+  { value: 'ap-south-1',     label: 'Asia Pacific (Mumbai)' },
+  { value: 'ap-southeast-1', label: 'Asia Pacific (Singapore)' },
+  { value: 'ap-southeast-2', label: 'Asia Pacific (Sydney)' },
+  { value: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
+  { value: 'eu-west-1',      label: 'Europe (Ireland)' },
+  { value: 'eu-central-1',   label: 'Europe (Frankfurt)' },
+  { value: 'eu-west-2',      label: 'Europe (London)' },
+  { value: 'ca-central-1',   label: 'Canada (Central)' },
+  { value: 'sa-east-1',      label: 'South America (São Paulo)' },
+]
+
 export function Servers() {
   const { servers, setServers, addToast } = useAppStore()
-  const [showAdd, setShowAdd] = useState(false)
-  const [srvMode, setSrvMode] = useState('smtp')
-  const [testing, setTesting] = useState(null)
+  const [showAdd, setShowAdd]     = useState(false)
+  const [srvMode, setSrvMode]     = useState('smtp')
+  const [provider, setProvider]   = useState('ses')
+  const [testing, setTesting]     = useState(null)
+  const [testingNew, setTestingNew] = useState(false)
+  const [testResult, setTestResult] = useState(null)
+  const [saving, setSaving]       = useState(false)
   const [form, setForm] = useState({
     name: '', host: '', port: 587, email: '', password: '',
-    encryption: 'tls', provider: 'ses', api_key: '', region: 'us-east-1',
+    encryption: 'tls', api_key: '', secret_key: '', region: 'us-east-1',
     from_email: '', from_name: '', daily_limit: 500, per_min_limit: 60
   })
 
-  useEffect(() => {
-    window.api.servers.getAll().then(setServers)
-  }, [])
+  useEffect(() => { window.api.servers.getAll().then(setServers) }, [])
+
+  const IS = {
+    width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
+    borderRadius: 'var(--rad)', fontSize: 13, background: 'var(--bg2)',
+    color: 'var(--txt)', fontFamily: 'var(--font)', outline: 'none', boxSizing: 'border-box'
+  }
+
+  const F = ({ label, fkey, type='text', hint, ...rest }) => (
+    <div style={{ marginBottom: 13 }}>
+      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>{label}</label>
+      <input type={type} value={form[fkey]} onChange={e => setForm(f => ({ ...f, [fkey]: e.target.value }))}
+        style={IS} {...rest} />
+      {hint && <div style={{ fontSize: 11, color: 'var(--txt3)', marginTop: 4 }}>{hint}</div>}
+    </div>
+  )
+
+  const Sel = ({ label, fkey, children, hint }) => (
+    <div style={{ marginBottom: 13 }}>
+      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>{label}</label>
+      <select value={form[fkey]} onChange={e => setForm(f => ({ ...f, [fkey]: e.target.value }))} style={IS}>
+        {children}
+      </select>
+      {hint && <div style={{ fontSize: 11, color: 'var(--txt3)', marginTop: 4 }}>{hint}</div>}
+    </div>
+  )
+
+  async function handleTestNew() {
+    setTestingNew(true)
+    setTestResult(null)
+    try {
+      let result
+      if (srvMode === 'smtp') {
+        result = await window.api.servers.testConfig({ ...form, type: 'smtp' })
+      } else if (provider === 'ses') {
+        result = await window.api.servers.testSes({
+          api_key:   form.api_key.trim(),
+          password:  form.secret_key.trim(),
+          region:    form.region,
+          from_email: form.from_email.trim(),
+          provider:  'ses',
+          type:      'api'
+        })
+      } else {
+        result = { success: true, message: 'API credentials saved — send test email to verify' }
+      }
+      setTestResult(result)
+    } catch (err) {
+      setTestResult({ success: false, message: err.message })
+    } finally {
+      setTestingNew(false)
+    }
+  }
 
   async function handleTest(id) {
     setTesting(id)
@@ -108,53 +178,53 @@ export function Servers() {
   async function handleDelete(id) {
     if (!confirm('Remove this server?')) return
     await window.api.servers.delete(id)
-    addToast('Server removed')
     window.api.servers.getAll().then(setServers)
   }
 
   async function handleSave() {
     if (!form.name) { addToast('Enter a server name', 'error'); return }
-    const payload = { ...form, type: srvMode }
-    const srv = await window.api.servers.create(payload)
-    // Auto-test on save
-    const result = await window.api.servers.test(srv.id)
-    if (result.success) addToast(`Server saved · Connected in ${result.latency}ms`, 'success')
-    else addToast('Server saved (connection failed — check credentials)', 'warning')
-    setShowAdd(false)
-    setForm({ name:'', host:'', port:587, email:'', password:'', encryption:'tls',
-              provider:'ses', api_key:'', region:'us-east-1', from_email:'', from_name:'',
-              daily_limit:500, per_min_limit:60 })
-    window.api.servers.getAll().then(setServers)
+    if (srvMode === 'api' && provider === 'ses') {
+      if (!form.api_key)    { addToast('Enter Access Key ID', 'error'); return }
+      if (!form.secret_key) { addToast('Enter Secret Access Key', 'error'); return }
+      if (!form.from_email) { addToast('Enter verified sender email', 'error'); return }
+    }
+
+    setSaving(true)
+    try {
+      const payload = {
+        ...form,
+        type:     srvMode,
+        provider: srvMode === 'api' ? provider : null,
+        // For SES: api_key = Access Key ID, password = Secret Access Key
+        password: srvMode === 'api' && provider === 'ses' ? form.secret_key : form.password,
+      }
+      const srv = await window.api.servers.create(payload)
+
+      // Auto-test
+      const result = await window.api.servers.test(srv.id)
+      if (result.success) addToast(`✅ Server saved & connected! ${result.message}`, 'success')
+      else addToast(`Server saved. Note: ${result.message}`, 'info')
+
+      setShowAdd(false)
+      setTestResult(null)
+      setForm({ name:'', host:'', port:587, email:'', password:'', encryption:'tls',
+                api_key:'', secret_key:'', region:'us-east-1', from_email:'', from_name:'',
+                daily_limit:500, per_min_limit:60 })
+      window.api.servers.getAll().then(setServers)
+    } catch (err) {
+      addToast('Error saving server: ' + err.message, 'error')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const F = ({ label, fkey, type = 'text', ...rest }) => (
-    <div style={{ marginBottom: 13 }}>
-      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>{label}</label>
-      <input type={type} value={form[fkey]} onChange={e => setForm(f => ({ ...f, [fkey]: e.target.value }))}
-        style={{ width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)', borderRadius: 'var(--rad)',
-          fontSize: 13, background: 'var(--bg2)', color: 'var(--txt)', fontFamily: 'var(--font)', outline: 'none' }}
-        {...rest} />
-    </div>
-  )
-
-  const S = ({ label, fkey, children }) => (
-    <div style={{ marginBottom: 13 }}>
-      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>{label}</label>
-      <select value={form[fkey]} onChange={e => setForm(f => ({ ...f, [fkey]: e.target.value }))}
-        style={{ width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)', borderRadius: 'var(--rad)',
-          fontSize: 13, background: 'var(--bg2)', color: 'var(--txt)', fontFamily: 'var(--font)' }}>
-        {children}
-      </select>
-    </div>
-  )
-
-  const statusDotColor = { active: '#22C55E', error: '#EF4444', limited: '#F59E0B', untested: '#9CA3AF' }
+  const statusDotColor = { active:'#22C55E', error:'#EF4444', limited:'#F59E0B', untested:'#9CA3AF' }
 
   return (
     <div>
-      <SectionHeader title="Email servers">
-        <Button variant="primary" onClick={() => setShowAdd(v => !v)}>
-          {showAdd ? '✕ Cancel' : '+ Add server'}
+      <SectionHeader title="Email Servers">
+        <Button variant="primary" onClick={() => { setShowAdd(v => !v); setTestResult(null) }}>
+          {showAdd ? '✕ Cancel' : '+ Add Server'}
         </Button>
       </SectionHeader>
 
@@ -164,29 +234,27 @@ export function Servers() {
         return (
           <div key={s.id} style={{
             display:'flex', alignItems:'center', gap:12, padding:'13px 16px',
-            background:'var(--bg2)', border:'1px solid var(--bdr)', borderRadius:'var(--rad-l)',
-            marginBottom:8,
+            background:'var(--bg2)', border:'1px solid var(--bdr)', borderRadius:'var(--rad-l)', marginBottom:8,
             ...(s.status === 'error' ? { borderColor:'#FCA5A5', background:'var(--re-l)' } : {}),
             ...(usedPct > 85 ? { borderColor:'#FCD34D' } : {}),
           }}>
-            <div style={{ width:8, height:8, borderRadius:'50%', background: statusDotColor[s.status] || '#9CA3AF', flexShrink:0 }} />
+            <div style={{ width:8, height:8, borderRadius:'50%', background: statusDotColor[s.status]||'#9CA3AF', flexShrink:0 }} />
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:500, fontSize:13 }}>{s.name}</div>
+              <div style={{ fontWeight:600, fontSize:13 }}>{s.name}</div>
               <div style={{ fontSize:11, color:'var(--txt3)', marginTop:2 }}>
                 {s.type === 'smtp'
-                  ? `${s.host}:${s.port} · ${s.encryption?.toUpperCase()} · App Password`
-                  : `${s.provider?.toUpperCase()} API`}
+                  ? `${s.host}:${s.port} · ${s.encryption?.toUpperCase()}`
+                  : `${s.provider?.toUpperCase()} · ${s.region || ''} · ${s.from_email || ''}`}
                 {' · '}{s.daily_limit?.toLocaleString()}/day
                 {s.last_tested && ` · Tested ${new Date(s.last_tested).toLocaleTimeString()}`}
               </div>
             </div>
-            <div style={{ fontSize:12, color: usedPct > 85 ? 'var(--re)' : 'var(--txt2)', textAlign:'right', flexShrink:0 }}>
-              {s.sent_today?.toLocaleString()} / {s.daily_limit?.toLocaleString()}<br/>
-              {usedPct}% used
+            <div style={{ fontSize:12, color: usedPct>85?'var(--re)':'var(--txt2)', textAlign:'right', flexShrink:0 }}>
+              {(s.sent_today||0).toLocaleString()} / {s.daily_limit?.toLocaleString()}<br/>{usedPct}% used
             </div>
-            <Badge variant={s.type}>{s.type.toUpperCase()}</Badge>
+            <Badge variant={s.type}>{s.type?.toUpperCase()}</Badge>
             <Badge variant={s.status}>{s.status}</Badge>
-            <Button size="sm" loading={testing === s.id} onClick={() => handleTest(s.id)}>Test</Button>
+            <Button size="sm" loading={testing===s.id} onClick={() => handleTest(s.id)}>Test</Button>
             <Button size="sm" variant="ghost-danger" onClick={() => handleDelete(s.id)}>Remove</Button>
           </div>
         )
@@ -194,65 +262,139 @@ export function Servers() {
 
       {servers.length === 0 && !showAdd && (
         <div style={{ textAlign:'center', padding:'48px', color:'var(--txt3)', fontSize:13 }}>
-          No servers yet. Add a SMTP or API server to start sending.
+          No servers yet. Add a SMTP server or AWS SES account to start sending.
         </div>
       )}
 
       {/* Add server form */}
       {showAdd && (
         <div style={{ background:'var(--bg)', border:'1px solid var(--bdr)', borderRadius:'var(--rad-l)', padding:20, marginTop:14 }}>
-          <div style={{ fontWeight:600, fontSize:14, marginBottom:14 }}>Add new server</div>
+          <div style={{ fontWeight:600, fontSize:14, marginBottom:14 }}>Add New Server</div>
 
           {/* Mode toggle */}
           <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-            {['smtp','api'].map(m => (
-              <div key={m}
-                style={{ flex:1, padding:12, border:`1.5px solid ${srvMode===m?'var(--pu)':'var(--bdr2)'}`,
-                  borderRadius:'var(--rad-l)', cursor:'pointer', background: srvMode===m ? 'var(--pu-l)' : 'var(--bg2)' }}
-                onClick={() => setSrvMode(m)}>
-                <div style={{ fontWeight:600, fontSize:13, marginBottom:2 }}>{m === 'smtp' ? 'SMTP' : 'API'}</div>
-                <div style={{ fontSize:12, color:'var(--txt2)' }}>
-                  {m === 'smtp' ? 'Gmail, Outlook, custom SMTP with app password' : 'Amazon SES, SendGrid, Mailgun'}
-                </div>
+            {[
+              { val:'smtp', title:'📧 SMTP Server',   desc:'Gmail, Outlook, custom SMTP' },
+              { val:'api',  title:'☁️ Cloud API',      desc:'AWS SES, SendGrid, Mailgun'  },
+            ].map(m => (
+              <div key={m.val} onClick={() => setSrvMode(m.val)}
+                style={{ flex:1, padding:12, border:`1.5px solid ${srvMode===m.val?'var(--pu)':'var(--bdr2)'}`,
+                  borderRadius:'var(--rad-l)', cursor:'pointer', background: srvMode===m.val?'var(--pu-l)':'var(--bg2)' }}>
+                <div style={{ fontWeight:600, fontSize:13, marginBottom:2 }}>{m.title}</div>
+                <div style={{ fontSize:12, color:'var(--txt2)' }}>{m.desc}</div>
               </div>
             ))}
           </div>
 
-          <F label="Server nickname" fkey="name" placeholder="e.g. Gmail SMTP #1" />
+          <F label="Server nickname *" fkey="name" placeholder={srvMode==='smtp'?'e.g. Gmail SMTP #1':'e.g. AWS SES Production'} />
 
-          {srvMode === 'smtp' ? (
+          {/* ── SMTP Form ── */}
+          {srvMode === 'smtp' && (
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-              <F label="Host" fkey="host" placeholder="smtp.gmail.com" />
+              <F label="SMTP Host *" fkey="host" placeholder="smtp.gmail.com" />
               <F label="Port" fkey="port" type="number" placeholder="587" />
-              <F label="Email address" fkey="email" type="email" placeholder="you@gmail.com" />
-              <F label="App password" fkey="password" type="password" placeholder="xxxx xxxx xxxx xxxx" />
-              <S label="Encryption" fkey="encryption">
-                <option value="tls">TLS (STARTTLS)</option>
+              <F label="Email address *" fkey="email" type="email" placeholder="you@gmail.com" />
+              <F label="App password *" fkey="password" type="password" placeholder="xxxx xxxx xxxx xxxx" hint="Use App Password, not your login password" />
+              <Sel label="Encryption" fkey="encryption">
+                <option value="tls">TLS (STARTTLS) — recommended</option>
                 <option value="ssl">SSL</option>
                 <option value="none">None</option>
-              </S>
-              <F label="Daily limit" fkey="daily_limit" type="number" placeholder="500" />
-              <F label="From name" fkey="from_name" placeholder="Mailflow" />
+              </Sel>
+              <F label="Daily send limit" fkey="daily_limit" type="number" placeholder="500" />
+              <F label="From name" fkey="from_name" placeholder="Your Company" />
               <F label="From email" fkey="from_email" type="email" placeholder="no-reply@domain.com" />
-            </div>
-          ) : (
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-              <S label="Provider" fkey="provider">
-                <option value="ses">Amazon SES</option>
-                <option value="sendgrid">SendGrid</option>
-                <option value="mailgun">Mailgun</option>
-              </S>
-              <F label="Region (SES)" fkey="region" placeholder="us-east-1" />
-              <F label="API key" fkey="api_key" type="password" placeholder="sk-..." />
-              <F label="Daily limit" fkey="daily_limit" type="number" placeholder="50000" />
-              <F label="From email" fkey="from_email" type="email" placeholder="no-reply@domain.com" />
-              <F label="From name" fkey="from_name" placeholder="Mailflow" />
             </div>
           )}
 
-          <div style={{ display:'flex', gap:8, marginTop:8 }}>
-            <Button variant="primary" onClick={handleSave}>Save & test connection</Button>
-            <Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
+          {/* ── API Form ── */}
+          {srvMode === 'api' && (
+            <div>
+              {/* Provider select */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16 }}>
+                {[
+                  { val:'ses',      label:'Amazon SES',  icon:'🔶' },
+                  { val:'sendgrid', label:'SendGrid',     icon:'🟦' },
+                  { val:'mailgun',  label:'Mailgun',      icon:'🟥' },
+                ].map(p => (
+                  <div key={p.val} onClick={() => setProvider(p.val)}
+                    style={{ padding:12, border:`1.5px solid ${provider===p.val?'var(--pu)':'var(--bdr2)'}`,
+                      borderRadius:'var(--rad)', cursor:'pointer', textAlign:'center',
+                      background: provider===p.val?'var(--pu-l)':'var(--bg2)' }}>
+                    <div style={{ fontSize:20, marginBottom:4 }}>{p.icon}</div>
+                    <div style={{ fontSize:12, fontWeight:600 }}>{p.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* AWS SES specific form */}
+              {provider === 'ses' && (
+                <div>
+                  <div style={{ background:'#FFF8E1', border:'1px solid #F39C12', borderRadius:'var(--rad)', padding:'10px 14px', marginBottom:16, fontSize:12, color:'#856404' }}>
+                    ℹ️ Make sure your IAM user has <strong>AmazonSESFullAccess</strong> policy and your sender email is verified in AWS SES console.
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+                    <F label="Access Key ID *" fkey="api_key" placeholder="AKIAIOSFODNN7EXAMPLE"
+                       hint="Found in AWS IAM → Users → Security credentials" />
+                    <F label="Secret Access Key *" fkey="secret_key" type="password" placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                       hint="Only visible once when created" />
+                    <div>
+                      <label style={{ fontSize:12, fontWeight:600, color:'var(--txt2)', display:'block', marginBottom:5 }}>AWS Region *</label>
+                      <select value={form.region} onChange={e => setForm(f => ({...f, region: e.target.value}))} style={IS}>
+                        {SES_REGIONS.map(r => <option key={r.value} value={r.value}>{r.label} ({r.value})</option>)}
+                      </select>
+                      <div style={{ fontSize:11, color:'var(--txt3)', marginTop:4 }}>Must match your SES region</div>
+                    </div>
+                    <F label="Verified Sender Email *" fkey="from_email" type="email" placeholder="no-reply@yourdomain.com"
+                       hint="Must be verified in SES console" />
+                    <F label="From Name" fkey="from_name" placeholder="Your Company" />
+                    <F label="Daily Send Limit" fkey="daily_limit" type="number" placeholder="50000"
+                       hint="Check your SES quota in AWS console" />
+                  </div>
+                </div>
+              )}
+
+              {/* Other API providers */}
+              {provider !== 'ses' && (
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+                  <F label="API Key *" fkey="api_key" type="password" placeholder="sk-..." />
+                  <F label="Daily limit" fkey="daily_limit" type="number" placeholder="50000" />
+                  <F label="From email *" fkey="from_email" type="email" placeholder="no-reply@domain.com" />
+                  <F label="From name" fkey="from_name" placeholder="Mailflow" />
+                  {provider === 'mailgun' && (
+                    <F label="Domain/Region" fkey="region" placeholder="mailgun.org" hint="Your Mailgun domain or region" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Test result */}
+          {testResult && (
+            <div style={{
+              marginTop:12, padding:'10px 14px', borderRadius:'var(--rad)', fontSize:12,
+              background: testResult.success ? 'var(--gr-l)' : 'var(--re-l)',
+              border: `1px solid ${testResult.success ? 'var(--gr)' : 'var(--re)'}`,
+              color: testResult.success ? 'var(--gr)' : 'var(--re)'
+            }}>
+              {testResult.success ? '✅' : '❌'} {testResult.message}
+              {testResult.success && testResult.quota && (
+                <div style={{ marginTop:6, color:'var(--txt2)', fontWeight:400 }}>
+                  Daily quota: {testResult.quota.max24Hour?.toLocaleString()} · 
+                  Used today: {testResult.quota.sentLast24h?.toLocaleString()} · 
+                  Rate: {testResult.quota.maxRate}/sec
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display:'flex', gap:8, marginTop:16, flexWrap:'wrap' }}>
+            <Button onClick={handleTestNew} loading={testingNew}>
+              🔌 Test Connection
+            </Button>
+            <Button variant="primary" onClick={handleSave} loading={saving}>
+              💾 Save Server
+            </Button>
+            <Button variant="ghost" onClick={() => { setShowAdd(false); setTestResult(null) }}>Cancel</Button>
           </div>
         </div>
       )}
