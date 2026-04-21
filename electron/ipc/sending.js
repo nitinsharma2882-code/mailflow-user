@@ -469,16 +469,26 @@ async function processBatch(campaignId) {
             templateAttachments = JSON.parse(state.campaign.attachments || '[]')
           } catch {}
 
-          // Inject open tracking pixel — use Railway URL so it works from recipient's device
-          const trackedHtml = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
+          // ── Send email — HTML sent EXACTLY as user wrote it ──
+          var fromEmail  = smtpEntry.server.from_email || smtpEntry.server.email || ''
+          var fromName   = state.campaign.from_name || 'Team'
+          var fromAddress = fromName + ' <' + fromEmail + '>'
+          var msgId      = buildMessageId(fromEmail)
+
+          // Only add tracking pixel — nothing else is modified
+          var finalHtml = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
+
+          // Generate plain text version (required — missing = spam signal)
+          var plainText = state.campaign.text_body || generateTextVersion(html)
 
           await deliverEmail(smtpEntry.server, {
             to:          job.email,
-            from:        `${state.campaign.from_name || 'Mailflow'} <${smtpEntry.server.from_email || smtpEntry.server.email}>`,
-            subject,
-            html:        trackedHtml,
-            text:        state.campaign.text_body || '',
+            from:        fromAddress,
+            subject:     subject,
+            html:        finalHtml,
+            text:        plainText,
             attachments: templateAttachments,
+            messageId:   msgId,
           })
 
           // Success
