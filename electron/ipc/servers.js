@@ -84,48 +84,64 @@ function registerServerHandlers() {
 async function testSmtpConnection(config) {
   const start = Date.now()
   try {
-    let transporter
+    if (config.provider === 'ses') return await testSesConnection(config)
 
-    if (config.type === 'smtp') {
-      transporter = nodemailer.createTransport({
-        host: config.host,
-        port: parseInt(config.port),
-        secure: config.encryption === 'ssl',
-        auth: { user: config.email, pass: config.password },
-        connectionTimeout: 8000,
-        greetingTimeout: 5000,
-      })
-    } else if (config.provider === 'ses') {
-      // Actually test SES credentials
-      return await testSesConnection(config)
-    } else {
-      return { success: true, latency: Date.now() - start, message: 'API credentials saved — send test email to fully verify' }
+    if (config.type !== 'smtp') {
+      return { success: true, latency: Date.now() - start, message: 'API credentials saved — send test email to verify' }
     }
+
+    var isM365 = config.host && (
+      config.host.includes('office365.com') ||
+      config.host.includes('outlook.com') ||
+      config.host.includes('microsoft.com')
+    )
+
+    var tlsConfig = isM365
+      ? { rejectUnauthorized: false, minVersion: 'TLSv1.2' }
+      : { rejectUnauthorized: false }
+
+    const transporter = nodemailer.createTransport({
+      host:               config.host,
+      port:               parseInt(config.port),
+      secure:             config.encryption === 'ssl',
+      requireTLS:         isM365 ? true : config.encryption !== 'none',
+      auth:               { user: config.email, pass: config.password },
+      connectionTimeout:  12000,
+      greetingTimeout:    8000,
+      tls:                tlsConfig,
+    })
 
     await transporter.verify()
+    transporter.close()
     const latency = Date.now() - start
 
-    return {
-      success: true,
-      latency,
-      message: `Connected in ${latency}ms — ready to send`
-    }
+    var msg = 'Connected in ' + latency + 'ms — ready to send'
+    if (isM365) msg = 'Microsoft 365 connected in ' + latency + 'ms ✓'
+
+    return { success: true, latency, message: msg }
+
   } catch (err) {
     return {
       success: false,
       latency: Date.now() - start,
-      error: err.message,
-      message: parseSmtpError(err.message)
+      error:   err.message,
+      message: parseSmtpError(err.message, config.host)
     }
   }
 }
 
-function parseSmtpError(msg) {
-  if (msg.includes('535') || msg.includes('auth')) return 'Authentication failed — check email and password'
+function parseSmtpError(msg, host) {
+  var isM365 = host && (host.includes('office365') || host.includes('outlook') || host.includes('microsoft'))
+  if (msg.includes('535') || msg.includes('auth') || msg.includes('5.7.3')) {
+    if (isM365) return 'M365 Auth failed — Check: (1) SMTP AUTH enabled in M365 admin, (2) Correct password or App Password if MFA on'
+    return 'Authentication failed — check email and password/app password'
+  }
+  if (msg.includes('5.7.57') || msg.includes('SMTP AUTH')) return 'M365: SMTP AUTH not enabled — Go to admin.microsoft.com → Users → Enable Authenticated SMTP'
   if (msg.includes('ECONNREFUSED')) return 'Connection refused — check host and port'
-  if (msg.includes('ETIMEDOUT') || msg.includes('timeout')) return 'Connection timed out — check host/firewall'
+  if (msg.includes('ETIMEDOUT') || msg.includes('timeout')) return 'Connection timed out — check host/firewall settings'
   if (msg.includes('ENOTFOUND')) return 'Host not found — check SMTP hostname'
-  if (msg.includes('SSL') || msg.includes('TLS')) return 'Encryption error — try switching TLS/SSL'
+  if (msg.includes('SSL') || msg.includes('TLS')) return 'Encryption error — ensure TLS is selected for port 587'
+  if (msg.includes('certificate')) return 'SSL certificate error — try disabling certificate validation'
   return msg
 }
 

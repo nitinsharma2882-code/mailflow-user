@@ -662,33 +662,103 @@ async function sendViaSes(server, mailOptions) {
 
 async function deliverEmail(server, mailOptions) {
   if (server.type === 'smtp') {
-    const transporter = nodemailer.createTransport({
-      host:    server.host,
-      port:    parseInt(server.port),
-      secure:  server.secure || server.encryption === 'ssl',
-      requireTLS: !server.secure && server.encryption !== 'none',
-      auth:    { user: server.email, pass: server.password },
-      connectionTimeout: 15000,
-      greetingTimeout:   10000,
-      socketTimeout:     15000,
-      tls: { rejectUnauthorized: false },
-    })
+    var crypto = require('crypto')
+    var host = server.host || ''
 
-    // Process and attach files if any
-    const attachments = await processAttachments(mailOptions.attachments || [])
-    const finalOptions = {
-      ...mailOptions,
-      // Deliverability headers — missing these = spam signal
-      headers: {
-        'X-Mailer':           'Mailflow/1.0',
-        'X-Priority':         '3',
-        'Message-ID':         mailOptions.messageId || ('<' + Date.now() + '@mailflow.app>'),
-        'X-Entity-Ref-ID':    require('crypto').randomBytes(16).toString('hex'),
-        'List-Unsubscribe':   '<mailto:unsubscribe@mailflow.app>',
-        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-        'Precedence':         'bulk',
+    var isM365   = host.includes('office365.com') || host.includes('microsoft.com')
+    var isOutlook = host.includes('outlook.com')
+    var isGmail  = host.includes('gmail.com')
+    var isMicrosoft = isM365 || isOutlook
+
+    // ── Transport config ─────────────────────────────────────────
+    var transportConfig = {
+      host:               host,
+      port:               parseInt(server.port) || 587,
+      secure:             server.encryption === 'ssl',
+      requireTLS:         server.encryption !== 'none',
+      auth:               { user: server.email, pass: server.password },
+      connectionTimeout:  25000,
+      greetingTimeout:    20000,
+      socketTimeout:      25000,
+      tls: {
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1.2',
       }
     }
+
+    // M365 specific TLS (Microsoft requires modern TLS)
+    if (isMicrosoft) {
+      transportConfig.tls.ciphers = [
+        'TLS_AES_256_GCM_SHA384',
+        'TLS_CHACHA20_POLY1305_SHA256',
+        'ECDHE-RSA-AES256-GCM-SHA384',
+        'ECDHE-RSA-AES128-GCM-SHA256'
+      ].join(':')
+    }
+
+    const transporter = nodemailer.createTransport(transportConfig)
+
+    // ── Process attachments ──────────────────────────────────────
+    const attachments = await processAttachments(mailOptions.attachments || [])
+
+    // ── Build anti-bot headers ───────────────────────────────────
+    var fromEmail  = server.from_email || server.email || ''
+    var fromDomain = fromEmail.split('@')[1] || 'mailflow.app'
+    var uniqueRef  = crypto.randomBytes(16).toString('hex')
+    var msgId      = mailOptions.messageId ||
+      ('<' + Date.now().toString(36) + '.' + crypto.randomBytes(8).toString('hex') + '@' + fromDomain + '>')
+
+    var headers = {
+      // Core headers — missing any of these = spam signal
+      'Message-ID':             msgId,
+      'Date':                   new Date().toUTCString(),
+      'MIME-Version':           '1.0',
+      'X-Entity-Ref-ID':        uniqueRef,
+
+      // Priority signals — tells mail servers this is legitimate
+      'X-Priority':             '3',
+      'X-MSMail-Priority':      'Normal',
+      'Importance':             'Normal',
+
+      // Unsubscribe — required by CAN-SPAM/GDPR, improves trust score
+      'List-Unsubscribe':       '<mailto:unsubscribe@' + fromDomain + '>',
+      'List-Unsubscribe-Post':  'List-Unsubscribe=One-Click',
+      'Precedence':             'bulk',
+    }
+
+    // ── Microsoft 365 specific anti-filter headers ───────────────
+    if (isMicrosoft) {
+      // These headers tell Microsoft's own filters to pass the email
+      headers['X-Mailer']                          = 'Microsoft Outlook 16.0.17928.20156'
+      headers['X-MS-Exchange-Organization-SCL']    = '-1'  // SCL -1 = bypass junk filter
+      headers['X-MS-Has-Attach']                   = attachments.length > 0 ? 'yes' : 'no'
+      headers['X-MS-TNEF-Correlator']             = ''
+      headers['X-MS-Exchange-Organization-AuthAs'] = 'Internal'
+      headers['X-MS-Exchange-Organization-AuthMechanism'] = '04'
+      headers['X-Auto-Response-Suppress']          = 'DR, OOF, AutoReply'
+      headers['Auto-Submitted']                    = 'auto-generated'
+      headers['X-Microsoft-Antispam']              = 'BCL:0;'
+      headers['X-Forefront-Antispam-Report']       = 'SFV:NSPM;'
+    }
+
+    // ── Gmail specific headers ───────────────────────────────────
+    if (isGmail) {
+      headers['X-Mailer'] = 'Google Gmail'
+      headers['X-Google-DKIM-Signature'] = 'bypass'
+    }
+
+    // ── Generic SMTP (non-Microsoft, non-Gmail) ──────────────────
+    if (!isMicrosoft && !isGmail) {
+      headers['X-Mailer'] = 'Mailflow/2.0'
+    }
+
+    var finalOptions = Object.assign({}, mailOptions, {
+      headers:     headers,
+      messageId:   msgId,
+      // Ensure text version always present (missing = spam signal)
+      text:        mailOptions.text || generateTextVersion(mailOptions.html || ''),
+    })
+
     if (attachments.length > 0) finalOptions.attachments = attachments
     else delete finalOptions.attachments
 
