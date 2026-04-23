@@ -246,27 +246,52 @@ function registerSmtpHandlers() {
       try { w.webContents.send('smtp:bulkProgress', { completed: 0, total: accounts.length, results: [] }) } catch {}
     })
 
-    // Process in parallel batches
+    // Process in parallel batches — guarantee every account gets a result
     for (var i = 0; i < accounts.length; i += CONCURRENCY) {
       var batch = accounts.slice(i, i + CONCURRENCY)
 
       var batchResults = await Promise.all(batch.map(async (account) => {
-        var result = await testSmtpBySending(account)
-        return {
-          email:     account.email,
-          host:      account.host,
-          port:      account.port,
-          status:    result.status,
-          category:  result.category,
-          label:     result.label,
-          message:   result.message,
-          recipient: result.recipient || '',
-          latency:   result.latency,
-          timestamp: new Date().toISOString(),
+        // Wrap in try/catch so a crash in one NEVER skips others
+        try {
+          var result = await testSmtpBySending(account)
+          return {
+            email:     account.email,
+            host:      account.host || '',
+            port:      account.port || 587,
+            status:    result.status,
+            category:  result.category,
+            label:     result.label,
+            message:   result.message,
+            recipient: result.recipient || '',
+            latency:   result.latency || 0,
+            timestamp: new Date().toISOString(),
+          }
+        } catch (unexpectedErr) {
+          // Safety net — this account had an unexpected crash
+          console.error('[SMTP Bulk] Unexpected error for ' + account.email + ':', unexpectedErr.message)
+          return {
+            email:     account.email || 'unknown',
+            host:      account.host || '',
+            port:      account.port || 587,
+            status:    'failed',
+            category:  'failed',
+            label:     'Failed',
+            message:   'Unexpected error: ' + (unexpectedErr.message || 'unknown'),
+            recipient: '',
+            latency:   0,
+            timestamp: new Date().toISOString(),
+          }
         }
       }))
 
-      results.push(...batchResults)
+      // Filter out any undefined/null results (extra safety)
+      var validBatchResults = batchResults.filter(r => r != null && r.email)
+      results.push(...validBatchResults)
+
+      // Verify count — log if mismatch
+      if (validBatchResults.length !== batch.length) {
+        console.error('[SMTP Bulk] ⚠ Batch mismatch! Expected ' + batch.length + ' got ' + validBatchResults.length)
+      }
 
       // Emit progress after each batch
       BrowserWindow.getAllWindows().forEach(w => {
@@ -280,6 +305,29 @@ function registerSmtpHandlers() {
       })
 
       console.log('[SMTP Bulk] Progress: ' + results.length + '/' + accounts.length)
+    }
+
+    // Final safety check — if any accounts are missing, add them as failed
+    if (results.length < accounts.length) {
+      console.error('[SMTP Bulk] ⚠ Missing results! Got ' + results.length + ' of ' + accounts.length)
+      var testedEmails = new Set(results.map(r => r.email))
+      for (var acc of accounts) {
+        if (!testedEmails.has(acc.email)) {
+          console.error('[SMTP Bulk] Adding missing account: ' + acc.email)
+          results.push({
+            email:     acc.email,
+            host:      acc.host || '',
+            port:      acc.port || 587,
+            status:    'failed',
+            category:  'failed',
+            label:     'Failed',
+            message:   'Account was not tested — possible crash during parallel processing',
+            recipient: '',
+            latency:   0,
+            timestamp: new Date().toISOString(),
+          })
+        }
+      }
     }
 
     // Save results to DB

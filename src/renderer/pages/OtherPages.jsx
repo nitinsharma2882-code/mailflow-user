@@ -821,19 +821,18 @@ export function SmtpTester() {
   useEffect(() => {
     window.api.on('smtp:bulkProgress', ({ completed, total, results: liveResults }) => {
       setProgress({ completed, total })
-      setResults(liveResults || [])
-      // Update summary in real-time
-      if (liveResults && liveResults.length > 0) {
-        setSummary({
-          total:    liveResults.length,
-          working:  liveResults.filter(r => r.status === 'working').length,
-          invalid:  liveResults.filter(r => r.status === 'invalid').length,
-          quota:    liveResults.filter(r => r.status === 'quota').length,
-          disabled: liveResults.filter(r => r.status === 'disabled').length,
-          timeout:  liveResults.filter(r => r.status === 'timeout' || r.status === 'connection').length,
-          failed:   liveResults.filter(r => r.status === 'failed').length,
-        })
-      }
+      const r = liveResults || []
+      setResults(r)
+      // Always compute summary from actual results — never from counts
+      setSummary({
+        total:    r.length,
+        working:  r.filter(x => x.status === 'working').length,
+        invalid:  r.filter(x => x.status === 'invalid').length,
+        quota:    r.filter(x => x.status === 'quota').length,
+        disabled: r.filter(x => x.status === 'disabled').length,
+        timeout:  r.filter(x => x.status === 'timeout' || x.status === 'connection').length,
+        failed:   r.filter(x => x.status === 'failed').length,
+      })
     })
   }, [])
 
@@ -893,9 +892,20 @@ export function SmtpTester() {
     try {
       const data = await window.api.smtp.testBulk(filePath)
       if (data.success) {
-        setResults(data.results || [])
-        setSummary(data.summary)
-        addToast('✅ Testing complete — ' + (data.summary?.working || 0) + ' working accounts found', 'success')
+        const finalResults = data.results || []
+        setResults(finalResults)
+        // Always compute from actual final results array
+        const finalSummary = {
+          total:    finalResults.length,
+          working:  finalResults.filter(r => r.status === 'working').length,
+          invalid:  finalResults.filter(r => r.status === 'invalid').length,
+          quota:    finalResults.filter(r => r.status === 'quota').length,
+          disabled: finalResults.filter(r => r.status === 'disabled').length,
+          timeout:  finalResults.filter(r => r.status === 'timeout' || r.status === 'connection').length,
+          failed:   finalResults.filter(r => r.status === 'failed').length,
+        }
+        setSummary(finalSummary)
+        addToast('✅ Testing complete — ' + finalSummary.working + ' working of ' + finalResults.length + ' accounts', 'success')
       } else {
         addToast(data.error || 'Bulk test failed', 'error')
       }
@@ -1068,11 +1078,11 @@ export function SmtpTester() {
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt2)', marginRight: 4 }}>Filter:</div>
             {[
               ['all', 'All (' + results.length + ')'],
-              ['working', 'Working (' + (summary?.working || 0) + ')'],
-              ['invalid', 'Invalid (' + (summary?.invalid || 0) + ')'],
-              ['quota', 'Quota (' + (summary?.quota || 0) + ')'],
-              ['disabled', 'Disabled (' + (summary?.disabled || 0) + ')'],
-              ['timeout', 'Timeout (' + (summary?.timeout || 0) + ')'],
+              ['working', 'Working (' + results.filter(r=>r.status==='working').length + ')'],
+              ['invalid', 'Invalid (' + results.filter(r=>r.status==='invalid').length + ')'],
+              ['quota', 'Quota (' + results.filter(r=>r.status==='quota').length + ')'],
+              ['disabled', 'Disabled (' + results.filter(r=>r.status==='disabled').length + ')'],
+              ['timeout', 'Timeout (' + results.filter(r=>r.status==='timeout'||r.status==='connection').length + ')'],
             ].map(([val, label]) => (
               <button key={val} onClick={() => setFilterStatus(val)}
                 style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
