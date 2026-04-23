@@ -309,8 +309,54 @@ async function startCampaign(campaignId) {
   try { customSmtpList = JSON.parse(campaign.custom_smtp_list || '[]') } catch {}
 
   if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
-    servers = customSmtpList.filter(a => a.working !== false).map(buildCustomSmtpServer)
-    console.log(`[Mailflow] Using ${servers.length} custom SMTP accounts`)
+    // Pre-validate all custom SMTPs before starting — only use working ones
+    console.log('[Mailflow] Pre-validating ' + customSmtpList.length + ' custom SMTP accounts...')
+    const { testSmtpAccount } = require('./customSmtp')
+    const VALIDATE_CONCURRENCY = 8
+
+    // Parallel validation
+    const validationResults = new Array(customSmtpList.length)
+    let vIdx = 0
+    async function vWorker() {
+      while (vIdx < customSmtpList.length) {
+        const i = vIdx++
+        const acc = customSmtpList[i]
+        try {
+          validationResults[i] = await testSmtpAccount({ email: acc.email, app_password: acc.app_password || acc.password })
+        } catch (e) {
+          validationResults[i] = { email: acc.email, working: false, status: 'failed', error: e.message }
+        }
+      }
+    }
+    const vWorkers = Array.from({ length: Math.min(VALIDATE_CONCURRENCY, customSmtpList.length) }, vWorker)
+    await Promise.all(vWorkers)
+
+    // Only keep working accounts
+    const workingAccounts = validationResults.filter(r => r && r.working)
+    console.log('[Mailflow] Pre-validation: ' + workingAccounts.length + '/' + customSmtpList.length + ' working')
+
+    if (workingAccounts.length === 0) {
+      return {
+        success: false,
+        error: 'No valid SMTP available. All ' + customSmtpList.length + ' accounts failed validation. Please check your SMTP list in the SMTP Tester.'
+      }
+    }
+
+    // Build servers from validated working accounts only
+    servers = workingAccounts.map(r => ({
+      type:        'smtp',
+      host:        r.host,
+      port:        r.port,
+      secure:      r.secure || false,
+      email:       r.email,
+      password:    r.app_password,
+      from_email:  r.email,
+      from_name:   null,
+      daily_limit: 500,
+      per_min_limit: 15,
+      _isCustom:   true,
+    }))
+    console.log('[Mailflow] Using ' + servers.length + ' validated SMTP accounts')
   } else {
     let serverIds = campaign.server_ids || '[]'
     if (typeof serverIds === 'string') { try { serverIds = JSON.parse(serverIds) } catch { serverIds = [] } }
@@ -371,7 +417,7 @@ async function startCampaign(campaignId) {
     })
   })
 
-  return { success: true, totalJobs: contacts.length, smtpCount: servers.length }
+  return { success: true, totalJobs: contacts.length, smtpCount: servers.length, validSmtp: servers.length }
 }
 
 async function processBatch(campaignId) {
@@ -469,16 +515,16 @@ async function processBatch(campaignId) {
             templateAttachments = JSON.parse(state.campaign.attachments || '[]')
           } catch {}
 
-          // ── Send email — HTML sent EXACTLY as user wrote it ──
-          var fromEmail  = smtpEntry.server.from_email || smtpEntry.server.email || ''
-          var fromName   = state.campaign.from_name || 'Team'
-          var fromAddress = fromName + ' <' + fromEmail + '>'
-          var msgId      = buildMessageId(fromEmail)
+          // ── STRICT: Send email EXACTLY as user wrote it — NO modifications ──
+          var fromEmail   = smtpEntry.server.from_email || smtpEntry.server.email || ''
+          var fromName    = state.campaign.from_name || ''
+          var fromAddress = fromName ? (fromName + ' <' + fromEmail + '>') : fromEmail
+          var msgId       = buildMessageId(fromEmail)
 
-          // Only add tracking pixel — nothing else is modified
+          // Only inject tracking pixel — nothing else touched
           var finalHtml = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
 
-          // Generate plain text version (required — missing = spam signal)
+          // Plain text: use template text_body if set, else generate from HTML
           var plainText = state.campaign.text_body || generateTextVersion(html)
 
           await deliverEmail(smtpEntry.server, {
@@ -499,27 +545,51 @@ async function processBatch(campaignId) {
           totalSent++
 
         } catch (err) {
-          console.log(`[Mailflow] Send failed for ${job.email}: ${err.message}`)
+          var errMsg = err.message || 'Unknown error'
+          var errLow = errMsg.toLowerCase()
+          console.log('[Mailflow] Send failed for ' + job.email + ': ' + errMsg)
 
-          if (isQuotaError(err.message)) {
-            state.rotation.markFailure(smtpEntry.id, err.message, true)
-            database.prepare(`UPDATE email_jobs SET status='pending', server_id=NULL WHERE id=?`).run(job.id)
+          // Categorize the error
+          var isQuota    = isQuotaError(errMsg)
+          var isInvalid  = errLow.includes('535') || errLow.includes('authentication') ||
+                           errLow.includes('invalid login') || errLow.includes('username and password') ||
+                           errLow.includes('bad credentials') || errLow.includes('5.7.8')
+          var isDisabled = errLow.includes('disabled') || errLow.includes('suspended') ||
+                           errLow.includes('blocked') || errLow.includes('not allowed') || errLow.includes('policy')
+          var isBad = isInvalid || isDisabled
+
+          if (isQuota) {
+            // Quota exceeded — remove from pool immediately, requeue email
+            state.rotation.markFailure(smtpEntry.id, errMsg, true)
+            database.prepare("UPDATE email_jobs SET status='pending', server_id=NULL WHERE id=?").run(job.id)
             BrowserWindow.getAllWindows().forEach(w => {
               try { w.webContents.send('sending:smtpQuota', { email: smtpEntry.id, campaignId }) } catch {}
             })
+            console.log('[Mailflow] SMTP quota exceeded — removed from pool: ' + smtpEntry.id)
             return
           }
 
-          const attempts = (job.attempts || 0) + 1
+          if (isBad) {
+            // Invalid/disabled SMTP — remove from pool immediately, requeue email
+            state.rotation.markFailure(smtpEntry.id, errMsg, false)
+            database.prepare("UPDATE email_jobs SET status='pending', server_id=NULL WHERE id=?").run(job.id)
+            console.log('[Mailflow] SMTP invalid/disabled — removed from pool: ' + smtpEntry.id)
+            return
+          }
+
+          // Transient error — retry up to 3 times
+          var attempts = (job.attempts || 0) + 1
           if (attempts >= 3) {
-            state.rotation.markFailure(smtpEntry.id, err.message, false)
-            database.prepare(`UPDATE email_jobs SET status='failed', attempts=?, error=? WHERE id=?`)
-              .run(attempts, err.message.substring(0, 200), job.id)
-            database.prepare(`UPDATE campaigns SET failed_count=failed_count+1 WHERE id=?`).run(campaignId)
+            // Mark SMTP as having errors but keep in pool
+            state.rotation.markFailure(smtpEntry.id, errMsg, false)
+            database.prepare("UPDATE email_jobs SET status='failed', attempts=?, error=? WHERE id=?")
+              .run(attempts, errMsg.substring(0, 200), job.id)
+            database.prepare("UPDATE campaigns SET failed_count=failed_count+1 WHERE id=?").run(campaignId)
           } else {
-            const retryAt = new Date(Date.now() + 30000).toISOString()
-            database.prepare(`UPDATE email_jobs SET status='retrying', attempts=?, error=?, next_retry_at=? WHERE id=?`)
-              .run(attempts, err.message.substring(0, 200), retryAt, job.id)
+            // Short retry delay — 30 seconds
+            var retryAt = new Date(Date.now() + 30000).toISOString()
+            database.prepare("UPDATE email_jobs SET status='retrying', attempts=?, error=?, next_retry_at=? WHERE id=?")
+              .run(attempts, errMsg.substring(0, 200), retryAt, job.id)
           }
         }
       }))
