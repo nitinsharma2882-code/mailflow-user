@@ -987,7 +987,7 @@ export function SmtpTester() {
               <div>
                 <div style={{ fontSize: 20, marginBottom: 4 }}>📄</div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt)' }}>
-                  {filePath.split('\').pop().split('/').pop()}
+                  {filePath.replace(/.*[\\/]/, '')}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--txt3)', marginTop: 2 }}>
                   {accounts.length} accounts loaded — click to change
