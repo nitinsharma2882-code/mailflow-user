@@ -80,50 +80,61 @@ function categorizeError(errMsg) {
 async function testSmtpBySending(smtpConfig, attempt = 1) {
   const start = Date.now()
   const { host, port, email, password } = smtpConfig
+  const portNum = parseInt(port) || 587
 
-  // Pick one random recipient from the fixed list
-  const recipient = TEST_RECIPIENTS[Math.floor(Math.random() * TEST_RECIPIENTS.length)]
+  console.log('[SMTP Test] Testing: ' + email + ' via ' + host + ':' + portNum + ' (attempt ' + attempt + ')')
 
   var transporter = null
   try {
-    transporter = nodemailer.createTransport({
-      host:               host,
-      port:               parseInt(port) || 587,
-      secure:             port == 465,
-      requireTLS:         port != 465,
-      auth:               { user: email, pass: password },
-      connectionTimeout:  8000,
-      greetingTimeout:    6000,
-      socketTimeout:      8000,
-      tls:                { rejectUnauthorized: false, minVersion: 'TLSv1.2' },
-    })
+    // Build transport config carefully
+    var transportConfig = {
+      host:              host,
+      port:              portNum,
+      secure:            portNum === 465,   // only SSL on port 465
+      auth:              { user: email, pass: password },
+      connectionTimeout: 15000,
+      greetingTimeout:   10000,
+      socketTimeout:     15000,
+      tls: {
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1',  // allow older TLS too
+      },
+    }
 
-    // First verify connection
+    // Only require TLS on port 587, not 25 or 465
+    if (portNum === 587) {
+      transportConfig.requireTLS = true
+    }
+
+    transporter = nodemailer.createTransport(transportConfig)
+
+    // Step 1: Verify connection + auth
     await transporter.verify()
+    const verifyLatency = Date.now() - start
+    console.log('[SMTP Test] ✅ Verify OK: ' + email + ' (' + verifyLatency + 'ms)')
 
-    // Then send actual test email
+    // Step 2: Send test email to one recipient
+    const recipient = TEST_RECIPIENTS[Math.floor(Math.random() * TEST_RECIPIENTS.length)]
+
     await transporter.sendMail({
-      from:    email,
+      from:    '"Mailflow Tester" <' + email + '>',
       to:      recipient,
       subject: 'SMTP Test - Mailflow',
       text:    'This is a test email to verify SMTP functionality. Sent by Mailflow SMTP Tester.',
       html:    '<p>This is a test email to verify SMTP functionality.</p><p>Sent by <strong>Mailflow SMTP Tester</strong>.</p>',
-      headers: {
-        'X-Mailer':    'Mailflow SMTP Tester v1.0',
-        'X-Test-Email': 'true',
-        'Message-ID':  '<test.' + Date.now() + '.' + Math.random().toString(36).substring(2) + '@mailflow.app>',
-      }
     })
 
     const latency = Date.now() - start
     transporter.close()
+
+    console.log('[SMTP Test] ✅ Email sent: ' + email + ' → ' + recipient + ' (' + latency + 'ms)')
 
     return {
       success:   true,
       status:    'working',
       category:  'working',
       label:     'Working',
-      message:   'Email sent successfully to ' + recipient + ' in ' + latency + 'ms',
+      message:   'Connected & sent to ' + recipient + ' in ' + latency + 'ms',
       recipient: recipient,
       latency:   latency,
     }
@@ -133,11 +144,14 @@ async function testSmtpBySending(smtpConfig, attempt = 1) {
     if (transporter) { try { transporter.close() } catch {} }
 
     const errMsg = err.message || 'Unknown error'
+    const errCode = err.code || ''
     const { category, label } = categorizeError(errMsg)
 
-    // Retry once on connection errors (not auth errors)
-    if (attempt === 1 && (category === 'connection' || category === 'timeout' || category === 'tls')) {
-      console.log('[SMTP Test] Retrying ' + email + ' after: ' + errMsg)
+    console.log('[SMTP Test] ❌ Failed: ' + email + ' — [' + category + '] ' + errMsg)
+
+    // Retry once on non-auth errors
+    if (attempt === 1 && category !== 'invalid' && category !== 'quota' && category !== 'disabled') {
+      console.log('[SMTP Test] Retrying ' + email + ' in 2s...')
       await new Promise(r => setTimeout(r, 2000))
       return testSmtpBySending(smtpConfig, 2)
     }
@@ -147,7 +161,7 @@ async function testSmtpBySending(smtpConfig, attempt = 1) {
       status:   category,
       category: category,
       label:    label,
-      message:  errMsg,
+      message:  errMsg.substring(0, 300),
       latency:  latency,
     }
   }
