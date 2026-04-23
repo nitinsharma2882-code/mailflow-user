@@ -271,16 +271,20 @@ function registerSendingHandlers() {
 
 function buildCustomSmtpServer(account) {
   const config = getSmtpConfig(account.email)
+  const port   = account.port || config?.port || 587
   return {
-    type: 'smtp',
-    host: account.host || config?.host || `smtp.${account.email.split('@')[1]}`,
-    port: account.port || config?.port || 587,
-    secure: account.secure || false,
-    email: account.email,
-    from_email: account.email,
-    password: account.app_password,
-    name: account.email,
-    _isCustom: true,
+    type:         'smtp',
+    host:         account.host || config?.host || ('smtp.' + account.email.split('@')[1]),
+    port:         port,
+    secure:       account.secure || port === 465,
+    encryption:   port === 465 ? 'ssl' : 'tls',
+    email:        account.email,
+    from_email:   account.email,
+    password:     account.app_password || account.password || '',
+    name:         account.email,
+    daily_limit:  500,
+    per_min_limit: 15,
+    _isCustom:    true,
   }
 }
 
@@ -309,54 +313,30 @@ async function startCampaign(campaignId) {
   try { customSmtpList = JSON.parse(campaign.custom_smtp_list || '[]') } catch {}
 
   if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
-    // Pre-validate all custom SMTPs before starting — only use working ones
-    console.log('[Mailflow] Pre-validating ' + customSmtpList.length + ' custom SMTP accounts...')
-    const { testSmtpAccount } = require('./customSmtp')
-    const VALIDATE_CONCURRENCY = 8
+    // custom_smtp_list already contains ONLY working accounts (filtered during Step 4 validation)
+    // Filter: exclude any that are explicitly marked as not working
+    const validAccounts = customSmtpList.filter(a =>
+      a.working !== false &&
+      a.status !== 'failed' &&
+      a.status !== 'invalid' &&
+      a.status !== 'quota_exceeded' &&
+      a.status !== 'timeout' &&
+      a.status !== 'disabled' &&
+      a.email &&
+      (a.app_password || a.password)  // must have a password
+    )
 
-    // Parallel validation
-    const validationResults = new Array(customSmtpList.length)
-    let vIdx = 0
-    async function vWorker() {
-      while (vIdx < customSmtpList.length) {
-        const i = vIdx++
-        const acc = customSmtpList[i]
-        try {
-          validationResults[i] = await testSmtpAccount({ email: acc.email, app_password: acc.app_password || acc.password })
-        } catch (e) {
-          validationResults[i] = { email: acc.email, working: false, status: 'failed', error: e.message }
-        }
-      }
-    }
-    const vWorkers = Array.from({ length: Math.min(VALIDATE_CONCURRENCY, customSmtpList.length) }, vWorker)
-    await Promise.all(vWorkers)
+    console.log('[Mailflow] Custom SMTP: ' + validAccounts.length + ' valid of ' + customSmtpList.length + ' total')
 
-    // Only keep working accounts
-    const workingAccounts = validationResults.filter(r => r && r.working)
-    console.log('[Mailflow] Pre-validation: ' + workingAccounts.length + '/' + customSmtpList.length + ' working')
-
-    if (workingAccounts.length === 0) {
+    if (validAccounts.length === 0) {
       return {
         success: false,
-        error: 'No valid SMTP available. All ' + customSmtpList.length + ' accounts failed validation. Please check your SMTP list in the SMTP Tester.'
+        error: 'No valid SMTP accounts available. Please go back to Step 4 and validate your SMTP accounts first using the "Test & Validate All SMTP" button.'
       }
     }
 
-    // Build servers from validated working accounts only
-    servers = workingAccounts.map(r => ({
-      type:        'smtp',
-      host:        r.host,
-      port:        r.port,
-      secure:      r.secure || false,
-      email:       r.email,
-      password:    r.app_password,
-      from_email:  r.email,
-      from_name:   null,
-      daily_limit: 500,
-      per_min_limit: 15,
-      _isCustom:   true,
-    }))
-    console.log('[Mailflow] Using ' + servers.length + ' validated SMTP accounts')
+    servers = validAccounts.map(buildCustomSmtpServer)
+    console.log('[Mailflow] Built ' + servers.length + ' SMTP server configs')
   } else {
     let serverIds = campaign.server_ids || '[]'
     if (typeof serverIds === 'string') { try { serverIds = JSON.parse(serverIds) } catch { serverIds = [] } }
@@ -751,18 +731,21 @@ async function deliverEmail(server, mailOptions) {
     var isMicrosoft = isM365 || isOutlook
 
     // ── Transport config ─────────────────────────────────────────
+    var portNum  = parseInt(server.port) || 587
+    var isSSL    = server.encryption === 'ssl' || portNum === 465
+    var isTLS    = !isSSL && portNum === 587  // only require TLS on standard port 587
     var transportConfig = {
       host:               host,
-      port:               parseInt(server.port) || 587,
-      secure:             server.encryption === 'ssl',
-      requireTLS:         server.encryption !== 'none',
+      port:               portNum,
+      secure:             isSSL,
+      requireTLS:         isTLS,
       auth:               { user: server.email, pass: server.password },
       connectionTimeout:  25000,
       greetingTimeout:    20000,
       socketTimeout:      25000,
       tls: {
         rejectUnauthorized: false,
-        minVersion: 'TLSv1.2',
+        minVersion: 'TLSv1',
       }
     }
 
