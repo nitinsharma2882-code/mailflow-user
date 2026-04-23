@@ -286,23 +286,69 @@ export function Servers() {
             ))}
           </div>
 
-          <F label="Server nickname *" fkey="name" placeholder={srvMode==='smtp'?'e.g. Gmail SMTP #1':'e.g. AWS SES Production'} />
+          <F label="Server nickname *" fkey="name" placeholder={srvMode==='smtp'?'e.g. Microsoft 365 — Main':'e.g. AWS SES Production'} />
 
           {/* ── SMTP Form ── */}
           {srvMode === 'smtp' && (
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-              <F label="SMTP Host *" fkey="host" placeholder="smtp.gmail.com" />
-              <F label="Port" fkey="port" type="number" placeholder="587" />
-              <F label="Email address *" fkey="email" type="email" placeholder="you@gmail.com" />
-              <F label="App password *" fkey="password" type="password" placeholder="xxxx xxxx xxxx xxxx" hint="Use App Password, not your login password" />
-              <Sel label="Encryption" fkey="encryption">
-                <option value="tls">TLS (STARTTLS) — recommended</option>
-                <option value="ssl">SSL</option>
-                <option value="none">None</option>
-              </Sel>
-              <F label="Daily send limit" fkey="daily_limit" type="number" placeholder="500" />
-              <F label="From name" fkey="from_name" placeholder="Your Company" />
-              <F label="From email" fkey="from_email" type="email" placeholder="no-reply@domain.com" />
+            <div>
+              {/* Quick setup presets */}
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:'var(--txt2)', marginBottom:8 }}>Quick Setup:</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  {[
+                    { label:'Microsoft 365', icon:'🔵', host:'smtp.office365.com', port:587, enc:'tls' },
+                    { label:'Gmail',         icon:'🔴', host:'smtp.gmail.com',     port:587, enc:'tls' },
+                    { label:'Outlook.com',   icon:'🟦', host:'smtp-mail.outlook.com', port:587, enc:'tls' },
+                    { label:'Yahoo',         icon:'🟣', host:'smtp.mail.yahoo.com', port:587, enc:'tls' },
+                    { label:'Custom SMTP',   icon:'⚙️', host:'', port:587, enc:'tls' },
+                  ].map(p => (
+                    <button key={p.label} type="button"
+                      onClick={() => setForm(f => ({ ...f, host: p.host, port: p.port, encryption: p.enc,
+                        name: f.name || (p.label + ' SMTP') }))}
+                      style={{ padding:'6px 12px', background:'var(--bg2)', border:'1px solid var(--bdr2)',
+                        borderRadius:'var(--rad)', fontSize:12, cursor:'pointer', color:'var(--txt)',
+                        fontFamily:'var(--font)' }}>
+                      {p.icon} {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Microsoft 365 guide */}
+              {form.host === 'smtp.office365.com' && (
+                <div style={{ background:'#EFF6FF', border:'1px solid #3B82F6', borderRadius:'var(--rad)', padding:'12px 16px', marginBottom:16, fontSize:12, color:'#1e40af' }}>
+                  <div style={{ fontWeight:700, marginBottom:6 }}>🔵 Microsoft 365 Setup Guide:</div>
+                  <ol style={{ margin:0, paddingLeft:16, lineHeight:1.8 }}>
+                    <li>Go to <strong>admin.microsoft.com</strong> → Users → Active Users</li>
+                    <li>Select the user → <strong>Mail</strong> tab → Manage email apps</li>
+                    <li>Enable <strong>Authenticated SMTP</strong> (SMTP AUTH)</li>
+                    <li>Use your <strong>full email</strong> as username and <strong>account password</strong></li>
+                    <li>Or create an <strong>App Password</strong> if MFA is enabled</li>
+                  </ol>
+                  <div style={{ marginTop:8, padding:'6px 10px', background:'rgba(59,130,246,0.1)', borderRadius:4 }}>
+                    💡 <strong>Tip:</strong> Microsoft 365 allows up to <strong>10,000 emails/day</strong> per mailbox
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+                <F label="SMTP Host *" fkey="host" placeholder="smtp.office365.com" />
+                <F label="Port" fkey="port" type="number" placeholder="587" />
+                <F label="Email address *" fkey="email" type="email" placeholder="you@yourdomain.com" />
+                <F label="Password *" fkey="password" type="password" placeholder="Your account password or App Password"
+                   hint={form.host === 'smtp.office365.com' ? 'Use account password or App Password if MFA enabled' : 'Use App Password for Gmail'} />
+                <Sel label="Encryption" fkey="encryption">
+                  <option value="tls">TLS (STARTTLS) — recommended</option>
+                  <option value="ssl">SSL</option>
+                  <option value="none">None</option>
+                </Sel>
+                <F label="Daily send limit" fkey="daily_limit" type="number"
+                   placeholder={form.host === 'smtp.office365.com' ? '10000' : '500'}
+                   hint={form.host === 'smtp.office365.com' ? 'M365: up to 10,000/day per mailbox' : ''} />
+                <F label="From name" fkey="from_name" placeholder="Your Company" />
+                <F label="From email" fkey="from_email" type="email" placeholder="no-reply@yourdomain.com"
+                   hint="Use same as email address for M365" />
+              </div>
             </div>
           )}
 
@@ -750,103 +796,349 @@ export function VerifyEmails() {
 // ── SMTP Tester Page ────────────────────────────────────────────────
 export function SmtpTester() {
   const { addToast } = useAppStore()
-  const [form, setForm] = useState({ host:'', port:587, email:'', password:'', encryption:'tls' })
-  const [results, setResults] = useState([])
-  const [summary, setSummary] = useState(null)
-  const [testing, setTesting] = useState(false)
 
-  const F = ({ label, fkey, type='text', ...rest }) => (
-    <div>
-      <label style={{ fontSize:12, fontWeight:600, color:'var(--txt2)', display:'block', marginBottom:5 }}>{label}</label>
-      <input type={type} value={form[fkey]} onChange={e => setForm(f => ({...f,[fkey]:e.target.value}))}
-        style={{ width:'100%', padding:'8px 11px', border:'1px solid var(--bdr2)', borderRadius:'var(--rad)',
-          fontSize:13, background:'var(--bg2)', color:'var(--txt)', fontFamily:'var(--font)', outline:'none' }}
-        {...rest} />
-    </div>
-  )
+  // Single test state
+  const [singleForm, setSingleForm] = useState({ host: '', port: 587, email: '', password: '', encryption: 'tls' })
+  const [singleResult, setSingleResult] = useState(null)
+  const [testingSingle, setTestingSingle] = useState(false)
 
-  async function handleSingle() {
-    if (!form.host || !form.email) { addToast('Fill in host and email', 'error'); return }
-    setTesting(true)
-    const r = await window.api.smtp.testSingle(form)
-    if (r.success) addToast(`✓ Connected in ${r.latency}ms`, 'success')
-    else addToast('✕ ' + r.message, 'error')
-    setResults([{ ...form, status: r.success ? 'working' : 'failed', details: r.message || r.error, latency: r.latency }])
-    setTesting(false)
+  // Bulk test state
+  const [accounts, setAccounts]       = useState([])  // parsed from CSV preview
+  const [results, setResults]         = useState([])
+  const [summary, setSummary]         = useState(null)
+  const [testing, setTesting]         = useState(false)
+  const [progress, setProgress]       = useState({ completed: 0, total: 0 })
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filePath, setFilePath]       = useState('')
+
+  const IS = {
+    width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
+    borderRadius: 'var(--rad)', fontSize: 13, background: 'var(--bg2)',
+    color: 'var(--txt)', fontFamily: 'var(--font)', outline: 'none'
   }
 
-  async function handleBulk() {
-    const r = await window.api.dialog.openFile({
-      filters: [{ name:'CSV', extensions:['csv'] }], properties:['openFile'],
+  // Listen for real-time bulk progress
+  useEffect(() => {
+    window.api.on('smtp:bulkProgress', ({ completed, total, results: liveResults }) => {
+      setProgress({ completed, total })
+      setResults(liveResults || [])
+      // Update summary in real-time
+      if (liveResults && liveResults.length > 0) {
+        setSummary({
+          total:    liveResults.length,
+          working:  liveResults.filter(r => r.status === 'working').length,
+          invalid:  liveResults.filter(r => r.status === 'invalid').length,
+          quota:    liveResults.filter(r => r.status === 'quota').length,
+          disabled: liveResults.filter(r => r.status === 'disabled').length,
+          timeout:  liveResults.filter(r => r.status === 'timeout' || r.status === 'connection').length,
+          failed:   liveResults.filter(r => r.status === 'failed').length,
+        })
+      }
     })
-    if (r.canceled) return
+  }, [])
+
+  // ── Single test ────────────────────────────────────────────────────────────
+  async function handleSingle() {
+    if (!singleForm.host || !singleForm.email || !singleForm.password) {
+      addToast('Fill in host, email and password', 'error'); return
+    }
+    setTestingSingle(true)
+    setSingleResult(null)
+    try {
+      const r = await window.api.smtp.testSingle(singleForm)
+      setSingleResult(r)
+      if (r.success) addToast('✅ Connected in ' + r.latency + 'ms', 'success')
+      else addToast('❌ ' + r.message, 'error')
+    } catch (err) {
+      addToast('Error: ' + err.message, 'error')
+    } finally {
+      setTestingSingle(false)
+    }
+  }
+
+  // ── Bulk test ──────────────────────────────────────────────────────────────
+  async function handlePickFile() {
+    const r = await window.api.dialog.openFile({
+      title: 'Select SMTP CSV',
+      filters: [{ name: 'CSV Files', extensions: ['csv', 'txt'] }],
+      properties: ['openFile'],
+    })
+    if (r.canceled || !r.filePaths[0]) return
+
+    setFilePath(r.filePaths[0])
+    setResults([])
+    setSummary(null)
+
+    // Preview accounts from CSV
+    try {
+      const parsed = await window.api.smtp.parseCsv(r.filePaths[0])
+      if (parsed.success) {
+        setAccounts(parsed.accounts || [])
+        addToast('Loaded ' + parsed.total + ' SMTP accounts', 'success')
+      } else {
+        addToast(parsed.error || 'Failed to parse CSV', 'error')
+      }
+    } catch (err) {
+      addToast('Error reading file: ' + err.message, 'error')
+    }
+  }
+
+  async function handleBulkTest() {
+    if (!filePath) { addToast('Upload a CSV file first', 'error'); return }
     setTesting(true)
-    const data = await window.api.smtp.testBulk(r.filePaths[0])
-    setResults(data.results || [])
-    setSummary(data.summary)
-    addToast(`Tested ${data.summary?.total || 0} SMTPs`, 'success')
-    setTesting(false)
+    setResults([])
+    setSummary(null)
+    setProgress({ completed: 0, total: accounts.length })
+
+    try {
+      const data = await window.api.smtp.testBulk(filePath)
+      if (data.success) {
+        setResults(data.results || [])
+        setSummary(data.summary)
+        addToast('✅ Testing complete — ' + (data.summary?.working || 0) + ' working accounts found', 'success')
+      } else {
+        addToast(data.error || 'Bulk test failed', 'error')
+      }
+    } catch (err) {
+      addToast('Error: ' + err.message, 'error')
+    } finally {
+      setTesting(false)
+    }
   }
 
   async function handleExport(type) {
-    const r = await window.api.smtp.export(results, type)
-    if (r.success) addToast(`Exported ${r.count} rows`, 'success')
+    if (results.length === 0) { addToast('No results to export', 'error'); return }
+    try {
+      const r = await window.api.smtp.export(results, type)
+      if (r.success) addToast('Downloaded ' + r.count + ' rows', 'success')
+      else if (!r.cancelled) addToast('Export failed', 'error')
+    } catch (err) {
+      addToast('Export error: ' + err.message, 'error')
+    }
   }
 
-  const cols = [
-    { key:'host', label:'Host', width:'22%' },
-    { key:'port', label:'Port', width:'8%' },
-    { key:'email', label:'Email', width:'24%' },
-    { key:'status', label:'Status', width:'12%', render: v => <Badge variant={v}>{v}</Badge> },
-    { key:'details', label:'Details', width:'24%', render: v => <span style={{ color:'var(--txt2)', fontSize:12 }}>{v}</span> },
-    { key:'latency', label:'Latency', width:'10%', render: v => v ? v+'ms' : '—' },
-  ]
+  // Status color helper
+  function statusColor(status) {
+    if (status === 'working')  return { bg: 'var(--gr-l)', color: 'var(--gr)', text: '✓ Working' }
+    if (status === 'invalid')  return { bg: '#FDEDEC', color: '#C0392B', text: '✕ Invalid Credentials' }
+    if (status === 'quota')    return { bg: '#FEF9E7', color: '#F39C12', text: '⚠ Quota Exceeded' }
+    if (status === 'disabled') return { bg: '#F8F9FA', color: '#888', text: '⊘ Disabled/Blocked' }
+    if (status === 'timeout' || status === 'connection') return { bg: '#EEF2FF', color: '#4A3AFF', text: '⏱ Timeout' }
+    return { bg: 'var(--re-l)', color: 'var(--re)', text: '✕ Failed' }
+  }
+
+  const filteredResults = filterStatus === 'all' ? results
+    : results.filter(r => r.status === filterStatus || r.category === filterStatus)
+
+  const pct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0
 
   return (
     <div>
-      <div style={{ display:'flex', gap:20, marginBottom:24, flexWrap:'wrap' }}>
-        <div style={{ flex:1, minWidth:280 }}>
-          <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>Single SMTP test</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
-            <F label="Host" fkey="host" placeholder="smtp.gmail.com" />
-            <F label="Port" fkey="port" type="number" placeholder="587" />
-            <F label="Email" fkey="email" type="email" placeholder="you@gmail.com" />
-            <F label="App password" fkey="password" type="password" placeholder="•••• ••••" />
+      <SectionHeader title="SMTP Tester" />
+
+      {/* ── TOP SECTION: Single + Bulk ── */}
+      <div style={{ display: 'flex', gap: 20, marginBottom: 24, flexWrap: 'wrap' }}>
+
+        {/* Single SMTP Test */}
+        <div style={{ flex: 1, minWidth: 300, background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', padding: 20 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 14 }}>🔌 Single SMTP Test</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            {[
+              ['SMTP Host', 'host', 'text', 'smtp.gmail.com'],
+              ['Port', 'port', 'number', '587'],
+              ['Email', 'email', 'email', 'you@gmail.com'],
+              ['App Password', 'password', 'password', '••••••••'],
+            ].map(([label, key, type, ph]) => (
+              <div key={key}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 4 }}>{label}</label>
+                <input type={type} value={singleForm[key]} placeholder={ph}
+                  onChange={e => setSingleForm(f => ({ ...f, [key]: e.target.value }))}
+                  style={IS} />
+              </div>
+            ))}
           </div>
-          <Button variant="primary" loading={testing} onClick={handleSingle}>Test connection</Button>
+          <Button variant="primary" loading={testingSingle} onClick={handleSingle}>
+            Test Connection
+          </Button>
+          {singleResult && (
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 'var(--rad)', fontSize: 12,
+              background: singleResult.success ? 'var(--gr-l)' : 'var(--re-l)',
+              border: '1px solid ' + (singleResult.success ? 'var(--gr)' : 'var(--re)'),
+              color: singleResult.success ? 'var(--gr)' : 'var(--re)' }}>
+              {singleResult.success ? '✅' : '❌'} {singleResult.message}
+              {singleResult.latency && <span style={{ marginLeft: 8, opacity: 0.7 }}>({singleResult.latency}ms)</span>}
+            </div>
+          )}
         </div>
-        <div style={{ flex:1, minWidth:280 }}>
-          <div style={{ fontWeight:600, fontSize:13, marginBottom:12 }}>Bulk SMTP test</div>
-          <div style={{ border:'2px dashed var(--bdr2)', borderRadius:'var(--rad-l)', padding:'24px',
-            textAlign:'center', cursor:'pointer', marginBottom:12 }} onClick={handleBulk}>
-            <div style={{ fontWeight:500, marginBottom:4 }}>Upload SMTP list CSV</div>
-            <div style={{ fontSize:12, color:'var(--txt3)' }}>Columns: host, port, email, password</div>
+
+        {/* Bulk SMTP Test */}
+        <div style={{ flex: 1, minWidth: 300, background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', padding: 20 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>📋 Bulk SMTP Test</div>
+          <div style={{ fontSize: 11, color: 'var(--txt3)', marginBottom: 14 }}>
+            CSV format: <code style={{ background: 'var(--bg3)', padding: '2px 6px', borderRadius: 4 }}>email,app_password</code> — one per line, no header needed
           </div>
-          <Button variant="primary" loading={testing} onClick={handleBulk}>Run bulk test</Button>
+
+          {/* Drop zone */}
+          <div onClick={handlePickFile}
+            style={{ border: '2px dashed var(--bdr2)', borderRadius: 'var(--rad)', padding: '20px',
+              textAlign: 'center', cursor: 'pointer', marginBottom: 12, background: 'var(--bg)',
+              transition: 'border-color 0.2s' }}>
+            {filePath ? (
+              <div>
+                <div style={{ fontSize: 20, marginBottom: 4 }}>📄</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt)' }}>
+                  {filePath.split('\').pop().split('/').pop()}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--txt3)', marginTop: 2 }}>
+                  {accounts.length} accounts loaded — click to change
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 28, marginBottom: 6 }}>📤</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Click to upload SMTP CSV</div>
+                <div style={{ fontSize: 11, color: 'var(--txt3)' }}>email,app_password format</div>
+              </div>
+            )}
+          </div>
+
+          {/* Account preview */}
+          {accounts.length > 0 && !testing && results.length === 0 && (
+            <div style={{ marginBottom: 12, maxHeight: 120, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', fontSize: 12 }}>
+              {accounts.slice(0, 8).map((a, i) => (
+                <div key={i} style={{ padding: '6px 10px', borderBottom: i < accounts.length-1 ? '1px solid var(--bdr)' : 'none', fontFamily: 'monospace', color: 'var(--txt2)' }}>
+                  {a.email} <span style={{ color: 'var(--txt3)' }}>via {a.host}</span>
+                </div>
+              ))}
+              {accounts.length > 8 && (
+                <div style={{ padding: '6px 10px', color: 'var(--txt3)', fontStyle: 'italic' }}>
+                  +{accounts.length - 8} more accounts...
+                </div>
+              )}
+            </div>
+          )}
+
+          <Button variant="primary" loading={testing} onClick={handleBulkTest}
+            disabled={!filePath || accounts.length === 0}>
+            {testing ? 'Testing... (' + progress.completed + '/' + progress.total + ')' : '🚀 Run Bulk Test (' + accounts.length + ' accounts)'}
+          </Button>
+
+          {/* Progress bar */}
+          {testing && progress.total > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--txt2)', marginBottom: 4 }}>
+                <span>Sending test emails in parallel (5 at a time)...</span>
+                <span>{pct}%</span>
+              </div>
+              <div style={{ background: 'var(--bdr)', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                <div style={{ background: 'var(--pu)', height: '100%', borderRadius: 4,
+                  width: pct + '%', transition: 'width 0.4s ease' }} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* ── SUMMARY CARDS ── */}
       {summary && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:16 }}>
-          {[['Total', summary.total, 'var(--txt)'],['Working', summary.working, 'var(--gr)'],['Failed', summary.failed, 'var(--re)']].map(([l,v,c]) => (
-            <div key={l} style={{ background:'var(--bg2)', border:'1px solid var(--bdr)', borderRadius:'var(--rad-l)', padding:'14px' }}>
-              <div style={{ fontSize:12, color:'var(--txt2)', marginBottom:5 }}>{l}</div>
-              <div style={{ fontSize:22, fontWeight:600, color: c }}>{(v||0).toLocaleString()}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 20 }}>
+          {[
+            ['Total Tested', summary.total,    'var(--txt)',    '📊'],
+            ['Working',      summary.working,   'var(--gr)',     '✅'],
+            ['Invalid Creds',summary.invalid,   '#C0392B',       '🔑'],
+            ['Quota Exceeded',summary.quota,    '#F39C12',       '⚠️'],
+            ['Disabled',     summary.disabled,  '#888',          '⊘'],
+            ['Timeout/Conn', summary.timeout,   'var(--pu)',     '⏱'],
+          ].map(([label, val, color, icon]) => (
+            <div key={label} style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)',
+              borderRadius: 'var(--rad-l)', padding: '14px 16px', textAlign: 'center' }}>
+              <div style={{ fontSize: 20, marginBottom: 4 }}>{icon}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1 }}>{val || 0}</div>
+              <div style={{ fontSize: 10, color: 'var(--txt3)', marginTop: 4, textTransform: 'uppercase', letterSpacing: '.5px' }}>{label}</div>
             </div>
           ))}
         </div>
       )}
 
+      {/* ── RESULTS TABLE ── */}
       {results.length > 0 && (
-        <>
-          <Table columns={cols} data={results} />
-          <div style={{ display:'flex', gap:8, marginTop:12 }}>
-            <Button onClick={() => handleExport('working')}>↓ Working SMTPs</Button>
-            <Button onClick={() => handleExport('failed')}>↓ Failed SMTPs</Button>
-            <Button onClick={() => handleExport('all')}>↓ All results</Button>
+        <div>
+          {/* Filter + Export bar */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt2)', marginRight: 4 }}>Filter:</div>
+            {[
+              ['all', 'All (' + results.length + ')'],
+              ['working', 'Working (' + (summary?.working || 0) + ')'],
+              ['invalid', 'Invalid (' + (summary?.invalid || 0) + ')'],
+              ['quota', 'Quota (' + (summary?.quota || 0) + ')'],
+              ['disabled', 'Disabled (' + (summary?.disabled || 0) + ')'],
+              ['timeout', 'Timeout (' + (summary?.timeout || 0) + ')'],
+            ].map(([val, label]) => (
+              <button key={val} onClick={() => setFilterStatus(val)}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                  border: 'none', fontFamily: 'var(--font)',
+                  background: filterStatus === val ? 'var(--pu)' : 'var(--bg2)',
+                  color: filterStatus === val ? '#fff' : 'var(--txt2)',
+                  border: filterStatus === val ? 'none' : '1px solid var(--bdr)' }}>
+                {label}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            <Button size="sm" variant="ghost" onClick={() => handleExport('working')}>↓ Working CSV</Button>
+            <Button size="sm" variant="ghost" onClick={() => handleExport('all')}>↓ Full Report</Button>
           </div>
-        </>
+
+          {/* Results table */}
+          <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden' }}>
+            <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <tr style={{ background: 'var(--bg3)' }}>
+                    {['#', 'SMTP Email', 'Status', 'Error / Details', 'Tested To', 'Time (ms)'].map(h => (
+                      <th key={h} style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 600,
+                        color: 'var(--txt2)', borderBottom: '1px solid var(--bdr)',
+                        fontSize: 11, textTransform: 'uppercase', background: 'var(--bg3)', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredResults.map((r, i) => {
+                    const s = statusColor(r.status)
+                    return (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--bdr)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                        <td style={{ padding: '8px 12px', color: 'var(--txt3)' }}>{i + 1}</td>
+                        <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11 }}>{r.email}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 20,
+                            background: s.bg, color: s.color, whiteSpace: 'nowrap' }}>
+                            {s.text}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 12px', color: 'var(--txt2)', fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          title={r.message}>
+                          {r.message || '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px', color: 'var(--txt3)', fontSize: 11, fontFamily: 'monospace' }}>
+                          {r.recipient || '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px', color: 'var(--txt2)' }}>
+                          {r.latency ? r.latency + 'ms' : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--txt3)', borderTop: '1px solid var(--bdr)', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Showing {filteredResults.length} of {results.length} results</span>
+              <span>{testing ? '● Testing in progress...' : '✓ Test complete'}</span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
 }
+
+
