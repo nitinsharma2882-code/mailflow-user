@@ -148,12 +148,12 @@ export function Servers() {
         result = await window.api.servers.testConfig({ ...form, type: 'smtp' })
       } else if (provider === 'ses') {
         result = await window.api.servers.testSes({
-          api_key:   form.api_key.trim(),
-          password:  form.secret_key.trim(),
-          region:    form.region,
+          api_key:    form.api_key.trim(),
+          password:   form.secret_key.trim(),
+          region:     form.region,
           from_email: form.from_email.trim(),
-          provider:  'ses',
-          type:      'api'
+          provider:   'ses',
+          type:       'api'
         })
       } else {
         result = { success: true, message: 'API credentials saved — send test email to verify' }
@@ -195,16 +195,12 @@ export function Servers() {
         ...form,
         type:     srvMode,
         provider: srvMode === 'api' ? provider : null,
-        // For SES: api_key = Access Key ID, password = Secret Access Key
         password: srvMode === 'api' && provider === 'ses' ? form.secret_key : form.password,
       }
       const srv = await window.api.servers.create(payload)
-
-      // Auto-test
       const result = await window.api.servers.test(srv.id)
       if (result.success) addToast(`✅ Server saved & connected! ${result.message}`, 'success')
       else addToast(`Server saved. Note: ${result.message}`, 'info')
-
       setShowAdd(false)
       setTestResult(null)
       setForm({ name:'', host:'', port:587, email:'', password:'', encryption:'tls',
@@ -228,7 +224,6 @@ export function Servers() {
         </Button>
       </SectionHeader>
 
-      {/* Server list */}
       {servers.map(s => {
         const usedPct = s.daily_limit > 0 ? Math.round((s.sent_today / s.daily_limit) * 100) : 0
         return (
@@ -266,12 +261,10 @@ export function Servers() {
         </div>
       )}
 
-      {/* Add server form */}
       {showAdd && (
         <div style={{ background:'var(--bg)', border:'1px solid var(--bdr)', borderRadius:'var(--rad-l)', padding:20, marginTop:14 }}>
           <div style={{ fontWeight:600, fontSize:14, marginBottom:14 }}>Add New Server</div>
 
-          {/* Mode toggle */}
           <div style={{ display:'flex', gap:8, marginBottom:16 }}>
             {[
               { val:'smtp', title:'📧 SMTP Server',   desc:'Gmail, Outlook, custom SMTP' },
@@ -288,33 +281,34 @@ export function Servers() {
 
           <F label="Server nickname *" fkey="name" placeholder={srvMode==='smtp'?'e.g. Microsoft 365 — Main':'e.g. AWS SES Production'} />
 
-          {/* ── SMTP Form ── */}
           {srvMode === 'smtp' && (
             <div>
-              {/* Quick setup presets */}
               <div style={{ marginBottom:16 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:'var(--txt2)', marginBottom:8 }}>Quick Setup:</div>
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                   {[
-                    { label:'Microsoft 365', icon:'🔵', host:'smtp.office365.com', port:587, enc:'tls' },
-                    { label:'Gmail',         icon:'🔴', host:'smtp.gmail.com',     port:587, enc:'tls' },
-                    { label:'Outlook.com',   icon:'🟦', host:'smtp-mail.outlook.com', port:587, enc:'tls' },
-                    { label:'Yahoo',         icon:'🟣', host:'smtp.mail.yahoo.com', port:587, enc:'tls' },
-                    { label:'Custom SMTP',   icon:'⚙️', host:'', port:587, enc:'tls' },
+                    { label:'Microsoft 365', icon:'🔵', host:'smtp.office365.com',     port:587, enc:'tls', daily:10000 },
+                    { label:'Gmail',         icon:'🔴', host:'smtp.gmail.com',          port:587, enc:'tls', daily:500   },
+                    { label:'Outlook.com',   icon:'🟦', host:'smtp-mail.outlook.com',   port:587, enc:'tls', daily:300   },
+                    { label:'Yahoo',         icon:'🟣', host:'smtp.mail.yahoo.com',     port:587, enc:'tls', daily:500   },
+                    { label:'iCloud',        icon:'⬜', host:'smtp.mail.me.com',        port:587, enc:'tls', daily:200   },
+                    { label:'Zoho Mail',     icon:'🟠', host:'smtp.zoho.com',           port:587, enc:'tls', daily:1000  },
+                    { label:'GoDaddy',       icon:'🟢', host:'smtpout.secureserver.net',port:587, enc:'tls', daily:500   },
+                    { label:'Hostinger',     icon:'🟡', host:'smtp.hostinger.com',      port:587, enc:'tls', daily:500   },
+                    { label:'Brevo',         icon:'🔷', host:'smtp-relay.brevo.com',    port:587, enc:'tls', daily:9000  },
+                    { label:'Custom SMTP',   icon:'⚙️', host:'',                        port:587, enc:'tls', daily:500   },
                   ].map(p => (
                     <button key={p.label} type="button"
-                      onClick={() => setForm(f => ({ ...f, host: p.host, port: p.port, encryption: p.enc,
-                        name: f.name || (p.label + ' SMTP') }))}
+                      onClick={() => setForm(f => ({ ...f, host:p.host, port:p.port, encryption:p.enc,
+                        daily_limit:p.daily, name:f.name||(p.label+' SMTP') }))}
                       style={{ padding:'6px 12px', background:'var(--bg2)', border:'1px solid var(--bdr2)',
-                        borderRadius:'var(--rad)', fontSize:12, cursor:'pointer', color:'var(--txt)',
-                        fontFamily:'var(--font)' }}>
+                        borderRadius:'var(--rad)', fontSize:12, cursor:'pointer', color:'var(--txt)', fontFamily:'var(--font)' }}>
                       {p.icon} {p.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Microsoft 365 guide */}
               {form.host === 'smtp.office365.com' && (
                 <div style={{ background:'#EFF6FF', border:'1px solid #3B82F6', borderRadius:'var(--rad)', padding:'12px 16px', marginBottom:16, fontSize:12, color:'#1e40af' }}>
                   <div style={{ fontWeight:700, marginBottom:6 }}>🔵 Microsoft 365 Setup Guide:</div>
@@ -346,16 +340,13 @@ export function Servers() {
                    placeholder={form.host === 'smtp.office365.com' ? '10000' : '500'}
                    hint={form.host === 'smtp.office365.com' ? 'M365: up to 10,000/day per mailbox' : ''} />
                 <F label="From name" fkey="from_name" placeholder="Your Company" />
-                <F label="From email" fkey="from_email" type="email" placeholder="no-reply@yourdomain.com"
-                   hint="Use same as email address for M365" />
+                <F label="From email" fkey="from_email" type="email" placeholder="no-reply@yourdomain.com" />
               </div>
             </div>
           )}
 
-          {/* ── API Form ── */}
           {srvMode === 'api' && (
             <div>
-              {/* Provider select */}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16 }}>
                 {[
                   { val:'ses',      label:'Amazon SES',  icon:'🔶' },
@@ -372,7 +363,6 @@ export function Servers() {
                 ))}
               </div>
 
-              {/* AWS SES specific form */}
               {provider === 'ses' && (
                 <div>
                   <div style={{ background:'#FFF8E1', border:'1px solid #F39C12', borderRadius:'var(--rad)', padding:'10px 14px', marginBottom:16, fontSize:12, color:'#856404' }}>
@@ -399,7 +389,6 @@ export function Servers() {
                 </div>
               )}
 
-              {/* Other API providers */}
               {provider !== 'ses' && (
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
                   <F label="API Key *" fkey="api_key" type="password" placeholder="sk-..." />
@@ -414,7 +403,6 @@ export function Servers() {
             </div>
           )}
 
-          {/* Test result */}
           {testResult && (
             <div style={{
               marginTop:12, padding:'10px 14px', borderRadius:'var(--rad)', fontSize:12,
@@ -425,8 +413,8 @@ export function Servers() {
               {testResult.success ? '✅' : '❌'} {testResult.message}
               {testResult.success && testResult.quota && (
                 <div style={{ marginTop:6, color:'var(--txt2)', fontWeight:400 }}>
-                  Daily quota: {testResult.quota.max24Hour?.toLocaleString()} · 
-                  Used today: {testResult.quota.sentLast24h?.toLocaleString()} · 
+                  Daily quota: {testResult.quota.max24Hour?.toLocaleString()} ·
+                  Used today: {testResult.quota.sentLast24h?.toLocaleString()} ·
                   Rate: {testResult.quota.maxRate}/sec
                 </div>
               )}
@@ -434,12 +422,8 @@ export function Servers() {
           )}
 
           <div style={{ display:'flex', gap:8, marginTop:16, flexWrap:'wrap' }}>
-            <Button onClick={handleTestNew} loading={testingNew}>
-              🔌 Test Connection
-            </Button>
-            <Button variant="primary" onClick={handleSave} loading={saving}>
-              💾 Save Server
-            </Button>
+            <Button onClick={handleTestNew} loading={testingNew}>🔌 Test Connection</Button>
+            <Button variant="primary" onClick={handleSave} loading={saving}>💾 Save Server</Button>
             <Button variant="ghost" onClick={() => { setShowAdd(false); setTestResult(null) }}>Cancel</Button>
           </div>
         </div>
@@ -529,7 +513,7 @@ export function Templates() {
         <div style={{ border:'1px solid var(--bdr)', borderRadius:'var(--rad)', marginBottom:14 }}>
           <div style={{ display:'flex', gap:4, flexWrap:'wrap', padding:'8px', background:'var(--bg3)',
             borderBottom:'1px solid var(--bdr)', borderRadius:'var(--rad) var(--rad) 0 0' }}>
-            {['name','email','company','city','tag'].map(v => (
+            {['name','email','address','st','id','company','city','tag'].map(v => (
               <button key={v} onClick={() => insertVar(v)}
                 style={{ padding:'4px 8px', fontSize:12, border:'1px solid var(--pu-m)', borderRadius:5,
                   background:'var(--pu-l)', color:'var(--pu)', cursor:'pointer', fontFamily:'var(--font)' }}>
@@ -617,10 +601,10 @@ export function Analytics() {
   }
 
   const t = data?.totals || {}
-  const totalSent = t.total_sent || 0
-  const openRate  = totalSent > 0 ? ((t.total_opens  / totalSent) * 100).toFixed(1) : '0.0'
-  const clickRate = totalSent > 0 ? ((t.total_clicks / totalSent) * 100).toFixed(1) : '0.0'
-  const bounceRate= totalSent > 0 ? ((t.total_bounces/ totalSent) * 100).toFixed(1) : '0.0'
+  const totalSent  = t.total_sent || 0
+  const openRate   = totalSent > 0 ? ((t.total_opens   / totalSent) * 100).toFixed(1) : '0.0'
+  const clickRate  = totalSent > 0 ? ((t.total_clicks  / totalSent) * 100).toFixed(1) : '0.0'
+  const bounceRate = totalSent > 0 ? ((t.total_bounces / totalSent) * 100).toFixed(1) : '0.0'
 
   const cols = [
     { key:'name', label:'Campaign', width:'26%', render: v => <strong>{v}</strong> },
@@ -797,19 +781,17 @@ export function VerifyEmails() {
 export function SmtpTester() {
   const { addToast } = useAppStore()
 
-  // Single test state
   const [singleForm, setSingleForm] = useState({ host: '', port: 587, email: '', password: '', encryption: 'tls' })
   const [singleResult, setSingleResult] = useState(null)
   const [testingSingle, setTestingSingle] = useState(false)
 
-  // Bulk test state
-  const [accounts, setAccounts]       = useState([])  // parsed from CSV preview
-  const [results, setResults]         = useState([])
-  const [summary, setSummary]         = useState(null)
-  const [testing, setTesting]         = useState(false)
-  const [progress, setProgress]       = useState({ completed: 0, total: 0 })
+  const [accounts, setAccounts]         = useState([])
+  const [results, setResults]           = useState([])
+  const [summary, setSummary]           = useState(null)
+  const [testing, setTesting]           = useState(false)
+  const [progress, setProgress]         = useState({ completed: 0, total: 0 })
   const [filterStatus, setFilterStatus] = useState('all')
-  const [filePath, setFilePath]       = useState('')
+  const [filePath, setFilePath]         = useState('')
 
   const IS = {
     width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
@@ -817,13 +799,11 @@ export function SmtpTester() {
     color: 'var(--txt)', fontFamily: 'var(--font)', outline: 'none'
   }
 
-  // Listen for real-time bulk progress
   useEffect(() => {
     window.api.on('smtp:bulkProgress', ({ completed, total, results: liveResults }) => {
       setProgress({ completed, total })
       const r = liveResults || []
       setResults(r)
-      // Always compute summary from actual results — never from counts
       setSummary({
         total:    r.length,
         working:  r.filter(x => x.status === 'working').length,
@@ -831,12 +811,11 @@ export function SmtpTester() {
         quota:    r.filter(x => x.status === 'quota').length,
         disabled: r.filter(x => x.status === 'disabled').length,
         timeout:  r.filter(x => x.status === 'timeout' || x.status === 'connection').length,
-        failed:   r.filter(x => x.status === 'failed').length,
+        failed:   r.filter(x => x.status === 'failed' || x.status === 'tls').length,
       })
     })
   }, [])
 
-  // ── Single test ────────────────────────────────────────────────────────────
   async function handleSingle() {
     if (!singleForm.host || !singleForm.email || !singleForm.password) {
       addToast('Fill in host, email and password', 'error'); return
@@ -855,7 +834,6 @@ export function SmtpTester() {
     }
   }
 
-  // ── Bulk test ──────────────────────────────────────────────────────────────
   async function handlePickFile() {
     const r = await window.api.dialog.openFile({
       title: 'Select SMTP CSV',
@@ -863,12 +841,9 @@ export function SmtpTester() {
       properties: ['openFile'],
     })
     if (r.canceled || !r.filePaths[0]) return
-
     setFilePath(r.filePaths[0])
     setResults([])
     setSummary(null)
-
-    // Preview accounts from CSV
     try {
       const parsed = await window.api.smtp.parseCsv(r.filePaths[0])
       if (parsed.success) {
@@ -888,13 +863,11 @@ export function SmtpTester() {
     setResults([])
     setSummary(null)
     setProgress({ completed: 0, total: accounts.length })
-
     try {
       const data = await window.api.smtp.testBulk(filePath)
       if (data.success) {
         const finalResults = data.results || []
         setResults(finalResults)
-        // Always compute from actual final results array
         const finalSummary = {
           total:    finalResults.length,
           working:  finalResults.filter(r => r.status === 'working').length,
@@ -902,7 +875,7 @@ export function SmtpTester() {
           quota:    finalResults.filter(r => r.status === 'quota').length,
           disabled: finalResults.filter(r => r.status === 'disabled').length,
           timeout:  finalResults.filter(r => r.status === 'timeout' || r.status === 'connection').length,
-          failed:   finalResults.filter(r => r.status === 'failed').length,
+          failed:   finalResults.filter(r => r.status === 'failed' || r.status === 'tls').length,
         }
         setSummary(finalSummary)
         addToast('✅ Testing complete — ' + finalSummary.working + ' working of ' + finalResults.length + ' accounts', 'success')
@@ -916,29 +889,35 @@ export function SmtpTester() {
     }
   }
 
+  // Fixed: use exportResults which maps to smtp:export IPC handler
   async function handleExport(type) {
     if (results.length === 0) { addToast('No results to export', 'error'); return }
     try {
-      const r = await window.api.smtp.export(results, type)
-      if (r.success) addToast('Downloaded ' + r.count + ' rows', 'success')
-      else if (!r.cancelled) addToast('Export failed', 'error')
+      const r = await window.api.smtp.exportResults(results, type)
+      if (r && r.success) addToast('Downloaded ' + r.count + ' rows — includes email + app password', 'success')
+      else if (r && r.error) addToast(r.error, 'error')
+      else if (r && !r.cancelled) addToast('Export failed', 'error')
     } catch (err) {
       addToast('Export error: ' + err.message, 'error')
     }
   }
 
-  // Status color helper
   function statusColor(status) {
-    if (status === 'working')  return { bg: 'var(--gr-l)', color: 'var(--gr)', text: '✓ Working' }
-    if (status === 'invalid')  return { bg: '#FDEDEC', color: '#C0392B', text: '✕ Invalid Credentials' }
-    if (status === 'quota')    return { bg: '#FEF9E7', color: '#F39C12', text: '⚠ Quota Exceeded' }
-    if (status === 'disabled') return { bg: '#F8F9FA', color: '#888', text: '⊘ Disabled/Blocked' }
-    if (status === 'timeout' || status === 'connection') return { bg: '#EEF2FF', color: '#4A3AFF', text: '⏱ Timeout' }
-    return { bg: 'var(--re-l)', color: 'var(--re)', text: '✕ Failed' }
+    if (status === 'working')                                return { bg: 'var(--gr-l)',  color: 'var(--gr)',  text: '✓ Working' }
+    if (status === 'invalid')                                return { bg: '#FDEDEC',      color: '#C0392B',    text: '✕ Invalid Credentials' }
+    if (status === 'quota')                                  return { bg: '#FEF9E7',      color: '#F39C12',    text: '⚠ Quota Exceeded' }
+    if (status === 'disabled')                               return { bg: '#F8F9FA',      color: '#888',       text: '⊘ Disabled/Blocked' }
+    if (status === 'timeout' || status === 'connection')     return { bg: '#EEF2FF',      color: '#4A3AFF',    text: '⏱ Timeout' }
+    if (status === 'failed'  || status === 'tls')            return { bg: 'var(--re-l)',  color: 'var(--re)',  text: '✕ Failed' }
+    return { bg: 'var(--re-l)', color: 'var(--re)', text: '✕ ' + status }
   }
 
   const filteredResults = filterStatus === 'all' ? results
-    : results.filter(r => r.status === filterStatus || r.category === filterStatus)
+    : filterStatus === 'failed'
+      ? results.filter(r => r.status === 'failed' || r.status === 'tls')
+      : filterStatus === 'timeout'
+        ? results.filter(r => r.status === 'timeout' || r.status === 'connection')
+        : results.filter(r => r.status === filterStatus)
 
   const pct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0
 
@@ -946,7 +925,6 @@ export function SmtpTester() {
     <div>
       <SectionHeader title="SMTP Tester" />
 
-      {/* ── TOP SECTION: Single + Bulk ── */}
       <div style={{ display: 'flex', gap: 20, marginBottom: 24, flexWrap: 'wrap' }}>
 
         {/* Single SMTP Test */}
@@ -954,9 +932,9 @@ export function SmtpTester() {
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 14 }}>🔌 Single SMTP Test</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
             {[
-              ['SMTP Host', 'host', 'text', 'smtp.gmail.com'],
-              ['Port', 'port', 'number', '587'],
-              ['Email', 'email', 'email', 'you@gmail.com'],
+              ['SMTP Host',    'host',     'text',     'smtp.gmail.com'],
+              ['Port',         'port',     'number',   '587'],
+              ['Email',        'email',    'email',    'you@gmail.com'],
               ['App Password', 'password', 'password', '••••••••'],
             ].map(([label, key, type, ph]) => (
               <div key={key}>
@@ -988,11 +966,9 @@ export function SmtpTester() {
             CSV format: <code style={{ background: 'var(--bg3)', padding: '2px 6px', borderRadius: 4 }}>email,app_password</code> — one per line, no header needed
           </div>
 
-          {/* Drop zone */}
           <div onClick={handlePickFile}
             style={{ border: '2px dashed var(--bdr2)', borderRadius: 'var(--rad)', padding: '20px',
-              textAlign: 'center', cursor: 'pointer', marginBottom: 12, background: 'var(--bg)',
-              transition: 'border-color 0.2s' }}>
+              textAlign: 'center', cursor: 'pointer', marginBottom: 12, background: 'var(--bg)' }}>
             {filePath ? (
               <div>
                 <div style={{ fontSize: 20, marginBottom: 4 }}>📄</div>
@@ -1012,7 +988,6 @@ export function SmtpTester() {
             )}
           </div>
 
-          {/* Account preview */}
           {accounts.length > 0 && !testing && results.length === 0 && (
             <div style={{ marginBottom: 12, maxHeight: 120, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', fontSize: 12 }}>
               {accounts.slice(0, 8).map((a, i) => (
@@ -1033,7 +1008,6 @@ export function SmtpTester() {
             {testing ? 'Testing... (' + progress.completed + '/' + progress.total + ')' : '🚀 Run Bulk Test (' + accounts.length + ' accounts)'}
           </Button>
 
-          {/* Progress bar */}
           {testing && progress.total > 0 && (
             <div style={{ marginTop: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--txt2)', marginBottom: 4 }}>
@@ -1049,19 +1023,21 @@ export function SmtpTester() {
         </div>
       </div>
 
-      {/* ── SUMMARY CARDS ── */}
+      {/* Summary Cards — includes Failed */}
       {summary && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10, marginBottom: 20 }}>
           {[
-            ['Total Tested', summary.total,    'var(--txt)',    '📊'],
-            ['Working',      summary.working,   'var(--gr)',     '✅'],
-            ['Invalid Creds',summary.invalid,   '#C0392B',       '🔑'],
-            ['Quota Exceeded',summary.quota,    '#F39C12',       '⚠️'],
-            ['Disabled',     summary.disabled,  '#888',          '⊘'],
-            ['Timeout/Conn', summary.timeout,   'var(--pu)',     '⏱'],
+            ['Total Tested',  summary.total,    'var(--txt)',  '📊'],
+            ['Working',       summary.working,   'var(--gr)',   '✅'],
+            ['Invalid Creds', summary.invalid,   '#C0392B',     '🔑'],
+            ['Quota Exceeded',summary.quota,     '#F39C12',     '⚠️'],
+            ['Disabled',      summary.disabled,  '#888',        '⊘'],
+            ['Timeout/Conn',  summary.timeout,   'var(--pu)',   '⏱'],
+            ['Failed',        summary.failed,    '#E74C3C',     '❌'],
           ].map(([label, val, color, icon]) => (
             <div key={label} style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)',
-              borderRadius: 'var(--rad-l)', padding: '14px 16px', textAlign: 'center' }}>
+              borderRadius: 'var(--rad-l)', padding: '14px 10px', textAlign: 'center', cursor: 'pointer' }}
+              onClick={() => setFilterStatus(label === 'Total Tested' ? 'all' : label === 'Invalid Creds' ? 'invalid' : label === 'Quota Exceeded' ? 'quota' : label === 'Timeout/Conn' ? 'timeout' : label.toLowerCase())}>
               <div style={{ fontSize: 20, marginBottom: 4 }}>{icon}</div>
               <div style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1 }}>{val || 0}</div>
               <div style={{ fontSize: 10, color: 'var(--txt3)', marginTop: 4, textTransform: 'uppercase', letterSpacing: '.5px' }}>{label}</div>
@@ -1070,35 +1046,35 @@ export function SmtpTester() {
         </div>
       )}
 
-      {/* ── RESULTS TABLE ── */}
+      {/* Results Table */}
       {results.length > 0 && (
         <div>
-          {/* Filter + Export bar */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt2)', marginRight: 4 }}>Filter:</div>
             {[
-              ['all', 'All (' + results.length + ')'],
-              ['working', 'Working (' + results.filter(r=>r.status==='working').length + ')'],
-              ['invalid', 'Invalid (' + results.filter(r=>r.status==='invalid').length + ')'],
-              ['quota', 'Quota (' + results.filter(r=>r.status==='quota').length + ')'],
+              ['all',      'All ('      + results.length + ')'],
+              ['working',  'Working ('  + results.filter(r=>r.status==='working').length + ')'],
+              ['invalid',  'Invalid ('  + results.filter(r=>r.status==='invalid').length + ')'],
+              ['quota',    'Quota ('    + results.filter(r=>r.status==='quota').length + ')'],
               ['disabled', 'Disabled (' + results.filter(r=>r.status==='disabled').length + ')'],
-              ['timeout', 'Timeout (' + results.filter(r=>r.status==='timeout'||r.status==='connection').length + ')'],
+              ['timeout',  'Timeout ('  + results.filter(r=>r.status==='timeout'||r.status==='connection').length + ')'],
+              ['failed',   'Failed ('   + results.filter(r=>r.status==='failed'||r.status==='tls').length + ')'],
             ].map(([val, label]) => (
               <button key={val} onClick={() => setFilterStatus(val)}
                 style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                  border: 'none', fontFamily: 'var(--font)',
+                  fontFamily: 'var(--font)',
                   background: filterStatus === val ? 'var(--pu)' : 'var(--bg2)',
                   color: filterStatus === val ? '#fff' : 'var(--txt2)',
-                  border: filterStatus === val ? 'none' : '1px solid var(--bdr)' }}>
+                  border: filterStatus === val ? '1px solid var(--pu)' : '1px solid var(--bdr)' }}>
                 {label}
               </button>
             ))}
             <div style={{ flex: 1 }} />
             <Button size="sm" variant="ghost" onClick={() => handleExport('working')}>↓ Working CSV</Button>
+            <Button size="sm" variant="ghost" onClick={() => handleExport('failed')}>↓ Failed CSV</Button>
             <Button size="sm" variant="ghost" onClick={() => handleExport('all')}>↓ Full Report</Button>
           </div>
 
-          {/* Results table */}
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden' }}>
             <div style={{ maxHeight: 500, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -1124,7 +1100,8 @@ export function SmtpTester() {
                             {s.text}
                           </span>
                         </td>
-                        <td style={{ padding: '8px 12px', color: 'var(--txt2)', fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        <td style={{ padding: '8px 12px', color: 'var(--txt2)', fontSize: 11, maxWidth: 260,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                           title={r.message}>
                           {r.message || '—'}
                         </td>
@@ -1150,5 +1127,3 @@ export function SmtpTester() {
     </div>
   )
 }
-
-

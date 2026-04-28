@@ -51,20 +51,22 @@ function detectSmtpConfig(email) {
 // ── Error categorization ─────────────────────────────────────────────────────
 function categorizeError(errMsg) {
   const msg = (errMsg || '').toLowerCase()
-
   if (msg.includes('535') || msg.includes('authentication') || msg.includes('invalid credentials') ||
-      msg.includes('username and password') || msg.includes('auth') || msg.includes('5.7.8')) {
+      msg.includes('username and password') || msg.includes('auth') || msg.includes('5.7.8') ||
+      msg.includes('invalid login') || msg.includes('bad credentials')) {
     return { category: 'invalid', label: 'Invalid Credentials' }
   }
-  if (msg.includes('daily') || msg.includes('quota') || msg.includes('limit') ||
-      msg.includes('exceeded') || msg.includes('4.7.') || msg.includes('too many')) {
+  if (msg.includes('daily') || msg.includes('quota') || msg.includes('limit exceeded') ||
+      msg.includes('too many') || msg.includes('4.7.') || msg.includes('rate')) {
     return { category: 'quota', label: 'Quota Exceeded' }
   }
   if (msg.includes('disabled') || msg.includes('suspended') || msg.includes('blocked') ||
-      msg.includes('5.7.0') || msg.includes('policy') || msg.includes('not allowed')) {
+      msg.includes('5.7.0') || msg.includes('policy') || msg.includes('not allowed') ||
+      msg.includes('deactivated')) {
     return { category: 'disabled', label: 'Account Disabled/Blocked' }
   }
-  if (msg.includes('econnrefused') || msg.includes('enotfound') || msg.includes('econnreset')) {
+  if (msg.includes('econnrefused') || msg.includes('enotfound') || msg.includes('econnreset') ||
+      msg.includes('network') || msg.includes('socket')) {
     return { category: 'connection', label: 'Connection Error' }
   }
   if (msg.includes('timeout') || msg.includes('etimedout') || msg.includes('timed out')) {
@@ -76,8 +78,9 @@ function categorizeError(errMsg) {
   return { category: 'failed', label: 'Send Failed' }
 }
 
-// ── Core: test one SMTP by actually sending an email ────────────────────────
-async function testSmtpBySending(smtpConfig, attempt = 1) {
+// ── Core: test one SMTP by actually sending ──────────────────────────────────
+async function testSmtpBySending(smtpConfig, attempt) {
+  if (!attempt) attempt = 1
   const start = Date.now()
   const { host, port, email, password } = smtpConfig
   const portNum = parseInt(port) || 587
@@ -86,36 +89,22 @@ async function testSmtpBySending(smtpConfig, attempt = 1) {
 
   var transporter = null
   try {
-    // Build transport config carefully
     var transportConfig = {
       host:              host,
       port:              portNum,
-      secure:            portNum === 465,   // only SSL on port 465
+      secure:            portNum === 465,
       auth:              { user: email, pass: password },
       connectionTimeout: 15000,
       greetingTimeout:   10000,
       socketTimeout:     15000,
-      tls: {
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1',  // allow older TLS too
-      },
+      tls:               { rejectUnauthorized: false, minVersion: 'TLSv1' },
     }
-
-    // Only require TLS on port 587, not 25 or 465
-    if (portNum === 587) {
-      transportConfig.requireTLS = true
-    }
+    if (portNum === 587) transportConfig.requireTLS = true
 
     transporter = nodemailer.createTransport(transportConfig)
-
-    // Step 1: Verify connection + auth
     await transporter.verify()
-    const verifyLatency = Date.now() - start
-    console.log('[SMTP Test] ✅ Verify OK: ' + email + ' (' + verifyLatency + 'ms)')
 
-    // Step 2: Send test email to one recipient
     const recipient = TEST_RECIPIENTS[Math.floor(Math.random() * TEST_RECIPIENTS.length)]
-
     await transporter.sendMail({
       from:    '"Mailflow Tester" <' + email + '>',
       to:      recipient,
@@ -126,8 +115,7 @@ async function testSmtpBySending(smtpConfig, attempt = 1) {
 
     const latency = Date.now() - start
     transporter.close()
-
-    console.log('[SMTP Test] ✅ Email sent: ' + email + ' → ' + recipient + ' (' + latency + 'ms)')
+    console.log('[SMTP Test] ✅ Working: ' + email + ' → ' + recipient + ' (' + latency + 'ms)')
 
     return {
       success:   true,
@@ -144,15 +132,12 @@ async function testSmtpBySending(smtpConfig, attempt = 1) {
     if (transporter) { try { transporter.close() } catch {} }
 
     const errMsg = err.message || 'Unknown error'
-    const errCode = err.code || ''
     const { category, label } = categorizeError(errMsg)
+    console.log('[SMTP Test] ❌ ' + category + ': ' + email + ' — ' + errMsg.substring(0, 80))
 
-    console.log('[SMTP Test] ❌ Failed: ' + email + ' — [' + category + '] ' + errMsg)
-
-    // Retry once on non-auth errors
     if (attempt === 1 && category !== 'invalid' && category !== 'quota' && category !== 'disabled') {
       console.log('[SMTP Test] Retrying ' + email + ' in 2s...')
-      await new Promise(r => setTimeout(r, 2000))
+      await new Promise(function(r) { setTimeout(r, 2000) })
       return testSmtpBySending(smtpConfig, 2)
     }
 
@@ -167,35 +152,30 @@ async function testSmtpBySending(smtpConfig, attempt = 1) {
   }
 }
 
-// ── Parse CSV — supports both formats ───────────────────────────────────────
-// Format 1 (simple): email,app_password (no header)
-// Format 2 (full):   host,port,email,password,encryption (with header)
+// ── Parse CSV ────────────────────────────────────────────────────────────────
 function parseSmtpCsv(content) {
-  const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+  const lines = content.split('\n').map(function(l) { return l.trim() }).filter(function(l) { return l.length > 0 })
   const accounts = []
 
   for (const line of lines) {
-    // Skip header rows
     if (line.toLowerCase().startsWith('email,') || line.toLowerCase().startsWith('host,')) continue
-
     const parts = line.split(',')
     if (parts.length < 2) continue
 
-    // Detect format by checking if first part looks like an email
     if (parts[0].includes('@')) {
-      // Format: email,app_password
       const email    = parts[0].trim()
-      // App passwords may have spaces — rejoin remaining parts
       const password = parts.slice(1).join(',').trim().replace(/^"|"$/g, '')
       const smtpConf = detectSmtpConfig(email)
-      accounts.push({ email, password, ...smtpConf })
+      // Store app_password explicitly so export always has it
+      accounts.push({ email, password, app_password: password, ...smtpConf })
     } else if (parts.length >= 3 && parts[2].includes('@')) {
-      // Format: host,port,email,password
+      const password = parts.slice(3).join(',').trim().replace(/^"|"$/g, '')
       accounts.push({
-        host:     parts[0].trim(),
-        port:     parseInt(parts[1]) || 587,
-        email:    parts[2].trim(),
-        password: parts.slice(3).join(',').trim().replace(/^"|"$/g, ''),
+        host:         parts[0].trim(),
+        port:         parseInt(parts[1]) || 587,
+        email:        parts[2].trim(),
+        password:     password,
+        app_password: password,
       })
     }
   }
@@ -206,28 +186,26 @@ function parseSmtpCsv(content) {
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
 function registerSmtpHandlers() {
 
-  // Single SMTP test — connection only (fast)
-  ipcMain.handle('smtp:testSingle', async (_, config) => {
+  // Single test
+  ipcMain.handle('smtp:testSingle', async function(_, config) {
     const { testSmtpConnection } = require('./servers')
     const result = await testSmtpConnection({ type: 'smtp', ...config })
     try {
-      db.get().prepare(`
-        INSERT INTO smtp_test_results (id, host, port, email, status, details, latency_ms, tested_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `).run(uuid(), config.host, config.port, config.email,
+      db.get().prepare(
+        "INSERT INTO smtp_test_results (id, host, port, email, status, details, latency_ms, tested_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+      ).run(uuid(), config.host, config.port, config.email,
         result.success ? 'working' : 'failed',
         result.message || result.error, result.latency)
     } catch {}
     return result
   })
 
-  // Bulk SMTP test — sends real emails, reports progress
-  ipcMain.handle('smtp:testBulk', async (_, filePath) => {
-    const CONCURRENCY = 5  // test 5 at a time
+  // Bulk test
+  ipcMain.handle('smtp:testBulk', async function(_, filePath) {
+    const CONCURRENCY = 5
     const results = []
 
-    // Read and parse the CSV file
-    let fileContent
+    var fileContent
     try {
       fileContent = fs.readFileSync(filePath, 'utf8')
     } catch (err) {
@@ -241,60 +219,55 @@ function registerSmtpHandlers() {
 
     console.log('[SMTP Bulk] Testing ' + accounts.length + ' accounts...')
 
-    // Emit start event
-    BrowserWindow.getAllWindows().forEach(w => {
+    BrowserWindow.getAllWindows().forEach(function(w) {
       try { w.webContents.send('smtp:bulkProgress', { completed: 0, total: accounts.length, results: [] }) } catch {}
     })
 
-    // Process in parallel batches — guarantee every account gets a result
     for (var i = 0; i < accounts.length; i += CONCURRENCY) {
       var batch = accounts.slice(i, i + CONCURRENCY)
 
-      var batchResults = await Promise.all(batch.map(async (account) => {
-        // Wrap in try/catch so a crash in one NEVER skips others
+      var batchResults = await Promise.all(batch.map(async function(account) {
         try {
           var result = await testSmtpBySending(account)
           return {
-            email:     account.email,
-            host:      account.host || '',
-            port:      account.port || 587,
-            status:    result.status,
-            category:  result.category,
-            label:     result.label,
-            message:   result.message,
-            recipient: result.recipient || '',
-            latency:   result.latency || 0,
-            timestamp: new Date().toISOString(),
+            email:        account.email,
+            app_password: account.app_password || account.password || '',
+            host:         account.host || '',
+            port:         account.port || 587,
+            status:       result.status,
+            category:     result.category,
+            label:        result.label,
+            message:      result.message,
+            recipient:    result.recipient || '',
+            latency:      result.latency || 0,
+            timestamp:    new Date().toISOString(),
           }
         } catch (unexpectedErr) {
-          // Safety net — this account had an unexpected crash
           console.error('[SMTP Bulk] Unexpected error for ' + account.email + ':', unexpectedErr.message)
           return {
-            email:     account.email || 'unknown',
-            host:      account.host || '',
-            port:      account.port || 587,
-            status:    'failed',
-            category:  'failed',
-            label:     'Failed',
-            message:   'Unexpected error: ' + (unexpectedErr.message || 'unknown'),
-            recipient: '',
-            latency:   0,
-            timestamp: new Date().toISOString(),
+            email:        account.email || 'unknown',
+            app_password: account.app_password || account.password || '',
+            host:         account.host || '',
+            port:         account.port || 587,
+            status:       'failed',
+            category:     'failed',
+            label:        'Failed',
+            message:      'Unexpected error: ' + (unexpectedErr.message || 'unknown'),
+            recipient:    '',
+            latency:      0,
+            timestamp:    new Date().toISOString(),
           }
         }
       }))
 
-      // Filter out any undefined/null results (extra safety)
-      var validBatchResults = batchResults.filter(r => r != null && r.email)
+      var validBatchResults = batchResults.filter(function(r) { return r != null && r.email })
       results.push(...validBatchResults)
 
-      // Verify count — log if mismatch
       if (validBatchResults.length !== batch.length) {
         console.error('[SMTP Bulk] ⚠ Batch mismatch! Expected ' + batch.length + ' got ' + validBatchResults.length)
       }
 
-      // Emit progress after each batch
-      BrowserWindow.getAllWindows().forEach(w => {
+      BrowserWindow.getAllWindows().forEach(function(w) {
         try {
           w.webContents.send('smtp:bulkProgress', {
             completed: results.length,
@@ -307,36 +280,35 @@ function registerSmtpHandlers() {
       console.log('[SMTP Bulk] Progress: ' + results.length + '/' + accounts.length)
     }
 
-    // Final safety check — if any accounts are missing, add them as failed
+    // Safety net — ensure all accounts have a result
     if (results.length < accounts.length) {
-      console.error('[SMTP Bulk] ⚠ Missing results! Got ' + results.length + ' of ' + accounts.length)
-      var testedEmails = new Set(results.map(r => r.email))
+      console.error('[SMTP Bulk] Missing results! Got ' + results.length + ' of ' + accounts.length)
+      var testedEmails = new Set(results.map(function(r) { return r.email }))
       for (var acc of accounts) {
         if (!testedEmails.has(acc.email)) {
-          console.error('[SMTP Bulk] Adding missing account: ' + acc.email)
           results.push({
-            email:     acc.email,
-            host:      acc.host || '',
-            port:      acc.port || 587,
-            status:    'failed',
-            category:  'failed',
-            label:     'Failed',
-            message:   'Account was not tested — possible crash during parallel processing',
-            recipient: '',
-            latency:   0,
-            timestamp: new Date().toISOString(),
+            email:        acc.email,
+            app_password: acc.app_password || acc.password || '',
+            host:         acc.host || '',
+            port:         acc.port || 587,
+            status:       'failed',
+            category:     'failed',
+            label:        'Failed',
+            message:      'Account was not tested — possible processing error',
+            recipient:    '',
+            latency:      0,
+            timestamp:    new Date().toISOString(),
           })
         }
       }
     }
 
-    // Save results to DB
+    // Save to DB
     try {
-      const insert = db.get().prepare(`
-        INSERT INTO smtp_test_results (id, host, port, email, status, details, latency_ms, tested_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `)
-      db.get().transaction(() => {
+      const insert = db.get().prepare(
+        "INSERT INTO smtp_test_results (id, host, port, email, status, details, latency_ms, tested_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+      )
+      db.get().transaction(function() {
         for (const r of results) {
           insert.run(uuid(), r.host || '', r.port || 587, r.email, r.status, r.message, r.latency)
         }
@@ -347,20 +319,20 @@ function registerSmtpHandlers() {
 
     var summary = {
       total:    results.length,
-      working:  results.filter(r => r.status === 'working').length,
-      invalid:  results.filter(r => r.status === 'invalid').length,
-      quota:    results.filter(r => r.status === 'quota').length,
-      disabled: results.filter(r => r.status === 'disabled').length,
-      timeout:  results.filter(r => r.status === 'timeout' || r.status === 'connection').length,
-      failed:   results.filter(r => r.status === 'failed').length,
+      working:  results.filter(function(r) { return r.status === 'working' }).length,
+      invalid:  results.filter(function(r) { return r.status === 'invalid' }).length,
+      quota:    results.filter(function(r) { return r.status === 'quota' }).length,
+      disabled: results.filter(function(r) { return r.status === 'disabled' }).length,
+      timeout:  results.filter(function(r) { return r.status === 'timeout' || r.status === 'connection' }).length,
+      failed:   results.filter(function(r) { return r.status === 'failed' || r.status === 'tls' }).length,
     }
 
     console.log('[SMTP Bulk] Done. Summary:', summary)
     return { success: true, results, summary }
   })
 
-  // Parse CSV without testing (preview accounts)
-  ipcMain.handle('smtp:parseCsv', async (_, filePath) => {
+  // Parse CSV preview
+  ipcMain.handle('smtp:parseCsv', async function(_, filePath) {
     try {
       const content  = fs.readFileSync(filePath, 'utf8')
       const accounts = parseSmtpCsv(content)
@@ -370,36 +342,63 @@ function registerSmtpHandlers() {
     }
   })
 
-  // Export results to CSV
-  ipcMain.handle('smtp:export', async (_, results, type) => {
+  // Export results — includes app_password, supports all categories including failed
+  ipcMain.handle('smtp:export', async function(_, results, type) {
     const { dialog } = require('electron')
-    var filtered = type === 'all' ? results : results.filter(r => r.status === type || r.category === type)
 
-    var { filePath } = await dialog.showSaveDialog({
+    var filtered
+    if (type === 'all') {
+      filtered = results
+    } else if (type === 'working') {
+      filtered = results.filter(function(r) { return r.status === 'working' })
+    } else if (type === 'invalid') {
+      filtered = results.filter(function(r) { return r.status === 'invalid' })
+    } else if (type === 'quota') {
+      filtered = results.filter(function(r) { return r.status === 'quota' })
+    } else if (type === 'disabled') {
+      filtered = results.filter(function(r) { return r.status === 'disabled' })
+    } else if (type === 'timeout') {
+      filtered = results.filter(function(r) { return r.status === 'timeout' || r.status === 'connection' })
+    } else if (type === 'failed') {
+      filtered = results.filter(function(r) { return r.status === 'failed' || r.status === 'tls' })
+    } else {
+      filtered = results.filter(function(r) { return r.status === type || r.category === type })
+    }
+
+    if (!filtered || filtered.length === 0) {
+      return { success: false, error: 'No data to export for this category' }
+    }
+
+    var saveResult = await dialog.showSaveDialog({
       defaultPath: type + '-smtps-' + Date.now() + '.csv',
       filters: [{ name: 'CSV Files', extensions: ['csv'] }]
     })
 
-    if (!filePath) return { cancelled: true }
+    if (saveResult.cancelled || !saveResult.filePath) return { cancelled: true }
 
-    var lines = [
-      'email,host,port,status,category,error_reason,recipient_tested,latency_ms,timestamp',
-      ...filtered.map(r =>
-        [r.email, r.host||'', r.port||587, r.status, r.category||r.status,
-         '"' + (r.message||'').replace(/"/g, "'") + '"',
-         r.recipient||'', r.latency||'', r.timestamp||''].join(',')
-      )
-    ]
+    var lines = ['email,app_password,status,error_reason,host,port,latency_ms,timestamp']
+    filtered.forEach(function(r) {
+      var email    = (r.email        || '').replace(/,/g, ' ')
+      var password = (r.app_password || '').replace(/,/g, ' ')
+      var status   = (r.status       || '')
+      var error    = (r.message      || '').replace(/,/g, ' ').replace(/\n/g, ' ').replace(/"/g, "'").substring(0, 300)
+      var host     = (r.host         || '').replace(/,/g, ' ')
+      var port     = r.port    || 587
+      var latency  = r.latency || ''
+      var ts       = r.timestamp || ''
+      lines.push([email, password, status, '"' + error + '"', host, port, latency, ts].join(','))
+    })
 
-    fs.writeFileSync(filePath, lines.join('\n'))
-    return { success: true, count: filtered.length, filePath }
+    fs.writeFileSync(saveResult.filePath, lines.join('\n'), 'utf8')
+    console.log('[SMTP Export] Wrote ' + filtered.length + ' rows to ' + saveResult.filePath)
+    return { success: true, count: filtered.length, filePath: saveResult.filePath }
   })
 }
 
 // ── Analytics handlers ────────────────────────────────────────────────────────
 function registerAnalyticsHandlers() {
 
-  ipcMain.handle('analytics:dashboard', () => {
+  ipcMain.handle('analytics:dashboard', function() {
     const database = db.get()
     const totals = database.prepare(`
       SELECT
@@ -419,24 +418,24 @@ function registerAnalyticsHandlers() {
       LEFT JOIN templates t ON c.template_id = t.id
       ORDER BY c.created_at DESC LIMIT 5
     `).all()
-    const serverHealth = database.prepare(`
-      SELECT id, name, type, status, sent_today, daily_limit FROM servers ORDER BY created_at DESC
-    `).all()
+    const serverHealth = database.prepare(
+      'SELECT id, name, type, status, sent_today, daily_limit FROM servers ORDER BY created_at DESC'
+    ).all()
     return { totals, recent, serverHealth }
   })
 
-  ipcMain.handle('analytics:overview', (_, period) => {
+  ipcMain.handle('analytics:overview', function(_, period) {
     const database = db.get()
     const days = period === '90days' ? 90 : period === 'alltime' ? 3650 : 30
     return database.prepare(`
       SELECT name, sent_count, open_count, click_count, bounce_count, unsubscribe_count, created_at
       FROM campaigns
-      WHERE status = 'sent' AND created_at >= datetime('now', ? || ' days')
+      WHERE status = 'sent' AND created_at >= datetime('now', '-' || ? || ' days')
       ORDER BY created_at ASC
-    `).all('-' + days)
+    `).all(days)
   })
 
-  ipcMain.handle('analytics:openers', async (_, campaignId) => {
+  ipcMain.handle('analytics:openers', async function(_, campaignId) {
     const database = db.get()
     const campaign = database.prepare('SELECT sent_count, open_count, total_recipients FROM campaigns WHERE id = ?').get(campaignId)
     const RAILWAY_URL = 'https://mailflow-tracking-server-production.up.railway.app'
@@ -474,14 +473,14 @@ function registerAnalyticsHandlers() {
     }
   })
 
-  ipcMain.handle('analytics:campaign', (_, campaignId) => {
+  ipcMain.handle('analytics:campaign', function(_, campaignId) {
     const database = db.get()
     const campaign  = database.prepare('SELECT * FROM campaigns WHERE id = ?').get(campaignId)
-    const events    = database.prepare(`SELECT type, COUNT(*) as count FROM tracking_events WHERE campaign_id = ? GROUP BY type`).all(campaignId)
+    const events    = database.prepare('SELECT type, COUNT(*) as count FROM tracking_events WHERE campaign_id = ? GROUP BY type').all(campaignId)
     return { campaign, events }
   })
 
-  ipcMain.handle('analytics:export', async (_, period) => {
+  ipcMain.handle('analytics:export', async function(_, period) {
     const { dialog } = require('electron')
     const database   = db.get()
     const campaigns  = database.prepare(`
@@ -495,10 +494,10 @@ function registerAnalyticsHandlers() {
     if (!filePath) return { cancelled: true }
     const lines = [
       'campaign,status,recipients,sent,opens,clicks,bounces,date',
-      ...campaigns.map(c =>
-        '"' + c.name + '",' + c.status + ',' + c.total_recipients + ',' + c.sent_count + ',' +
-        c.open_count + ',' + c.click_count + ',' + c.bounce_count + ',' + c.created_at
-      )
+      ...campaigns.map(function(c) {
+        return '"' + c.name + '",' + c.status + ',' + c.total_recipients + ',' + c.sent_count + ',' +
+          c.open_count + ',' + c.click_count + ',' + c.bounce_count + ',' + c.created_at
+      })
     ]
     fs.writeFileSync(filePath, lines.join('\n'))
     return { success: true, count: campaigns.length }
