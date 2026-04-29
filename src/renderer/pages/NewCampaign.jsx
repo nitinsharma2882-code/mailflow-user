@@ -52,13 +52,19 @@ export default function NewCampaign() {
       }
     })
 
-    window.api.on('customSmtp:progress', ({ completed, total }) => {
+    const onSmtpProgress = ({ completed, total }) => {
       setSmtpProgress({ completed, total })
-    })
-    window.api.on('sending:smtpQuota', ({ email }) => {
-      setQuotaWarnings(prev => [...prev, email])
+    }
+    const onSmtpQuota = ({ email }) => {
+      setQuotaWarnings(prev => prev.length < 50 ? [...prev, email] : prev)
       addToast(`⚠ SMTP quota exceeded: ${email} — switched to next available`, 'error')
-    })
+    }
+    window.api.on('customSmtp:progress', onSmtpProgress)
+    window.api.on('sending:smtpQuota', onSmtpQuota)
+    return () => {
+      window.api.off('customSmtp:progress', onSmtpProgress)
+      window.api.off('sending:smtpQuota', onSmtpQuota)
+    }
   }, [])
 
   // ── Step 2: Contacts ──
@@ -75,7 +81,7 @@ export default function NewCampaign() {
       const data = await window.api.contacts.importCSV(result.filePaths[0], listName)
       setCampaign(c => ({ ...c, contact_list_id: data.listId }))
       setSelectedListInfo({ total: data.total, valid: data.valid, invalid: data.invalid })
-      setPreview(data.preview || [])
+      setPreview((data.preview || []).slice(0, 200))
       await window.api.contacts.getLists().then(setContactLists)
       console.log(`[Mailflow] Imported ${data.total} contacts`)
     } catch (err) {
@@ -90,7 +96,7 @@ export default function NewCampaign() {
     if (!listId) { setSelectedListInfo(null); setPreview([]); return }
     const list = contactLists.find(l => l.id === listId)
     setSelectedListInfo(list)
-    const rows = await window.api.contacts.getPreview(listId)
+    const rows = await window.api.contacts.getPreview(listId, 200)
     setPreview(rows)
   }
 
@@ -234,14 +240,7 @@ export default function NewCampaign() {
     }
     setLaunching(true)
     try {
-      // Always fetch latest template to avoid stale data
-      let latestTemplateId = campaign.template_id
-      if (campaign.template_id) {
-        const freshTemplates = await window.api.templates.getAll()
-        setTemplates(freshTemplates)
-        const found = freshTemplates.find(t => t.id === campaign.template_id)
-        if (found) latestTemplateId = found.id
-      }
+      const latestTemplateId = campaign.template_id
 
       const created = await window.api.campaigns.create({
         ...campaign,
@@ -462,7 +461,7 @@ export default function NewCampaign() {
               </div>
               <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--txt3)', borderTop: '1px solid var(--bdr)', display: 'flex', justifyContent: 'space-between' }}>
                 <span>{selectedListInfo?.valid?.toLocaleString()} valid · {selectedListInfo?.invalid?.toLocaleString()} invalid</span>
-                <span>{preview.length.toLocaleString()} total loaded</span>
+                <span>Showing first {preview.length.toLocaleString()} of {(selectedListInfo?.total || preview.length).toLocaleString()} contacts</span>
               </div>
             </div>
           )}

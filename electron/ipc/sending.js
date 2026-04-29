@@ -301,7 +301,7 @@ async function startCampaign(campaignId) {
 
   console.log(`[Mailflow] Starting campaign: ${campaign.name}`)
 
-  const contacts = database.prepare(`SELECT * FROM contacts WHERE list_id=? AND status='valid'`).all(campaign.contact_list_id)
+  const contacts = database.prepare(`SELECT id, email FROM contacts WHERE list_id=? AND status='valid'`).all(campaign.contact_list_id)
   if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
 
   console.log(`[Mailflow] ${contacts.length} valid contacts found`)
@@ -371,7 +371,7 @@ async function startCampaign(campaignId) {
   console.log(`[Mailflow] Created ${jobCount.cnt} email jobs`)
 
   const allJobs = database.prepare(`SELECT id, campaign_id, email FROM email_jobs WHERE campaign_id=?`).all(campaignId)
-  registerJobsWithTrackingServer(allJobs).catch(() => {})
+  registerJobsWithTrackingServer(allJobs.slice(0, 1000)).catch(() => {})
 
   database.prepare(`
     UPDATE campaigns SET status='running', started_at=datetime('now'),
