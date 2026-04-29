@@ -14,33 +14,49 @@ export default function Campaigns() {
   const [openersLoading, setOpenersLoading] = useState(false)
 
   const load = useCallback(() => {
-    window.api.campaigns.getAll().then(setCampaigns)
+    window.api.campaigns.getAll()
+      .then(data => setCampaigns(Array.isArray(data) ? data : []))
+      .catch(err => console.error('[Campaigns] Failed to load:', err))
   }, [setCampaigns])
 
   useEffect(() => {
     load()
+
     // Real-time progress updates
-    window.api.on('sending:progress', ({ campaignId, sent_count, failed_count, open_count, total_recipients }) => {
-      setCampaigns(prev => prev.map(c =>
-        c.id === campaignId
-          ? { ...c, sent_count: sent_count||0, failed_count: failed_count||0, open_count: open_count||0, total_recipients: total_recipients||c.total_recipients }
-          : c
-      ))
-    })
-    window.api.on('campaign:statusChange', () => load())
+    const onProgress = ({ campaignId, sent_count, failed_count, open_count, total_recipients }) => {
+      setCampaigns(prev => {
+        if (!Array.isArray(prev)) return prev
+        return prev.map(c =>
+          c.id === campaignId
+            ? { ...c, sent_count: sent_count||0, failed_count: failed_count||0, open_count: open_count||0, total_recipients: total_recipients||c.total_recipients }
+            : c
+        )
+      })
+    }
+    const onStatusChange = () => load()
+
+    window.api.on('sending:progress',    onProgress)
+    window.api.on('campaign:statusChange', onStatusChange)
 
     // Auto-refresh every 5s for running campaigns
     const interval = setInterval(() => {
       setCampaigns(prev => {
+        if (!Array.isArray(prev)) return prev
         const hasRunning = prev.some(c => c.status === 'running')
         if (hasRunning) load()
         return prev
       })
     }, 5000)
-    return () => clearInterval(interval)
+
+    return () => {
+      clearInterval(interval)
+      window.api.off('sending:progress',    onProgress)
+      window.api.off('campaign:statusChange', onStatusChange)
+    }
   }, [load])
 
-  const filtered = filter === 'all' ? campaigns : campaigns.filter(c => c.status === filter)
+  const safeCampaigns = Array.isArray(campaigns) ? campaigns : []
+  const filtered = filter === 'all' ? safeCampaigns : safeCampaigns.filter(c => c.status === filter)
 
   async function handlePause(id) {
     await window.api.sending.pauseCampaign(id)

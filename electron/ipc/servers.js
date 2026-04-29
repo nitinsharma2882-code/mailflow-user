@@ -79,6 +79,10 @@ function registerServerHandlers() {
   ipcMain.handle('servers:testConfig', async (_, config) => {
     return testSmtpConnection(config)
   })
+
+  ipcMain.handle('servers:testSes', async (_, config) => {
+    return testSesConnection(config)
+  })
 }
 
 async function testSmtpConnection(config) {
@@ -208,11 +212,5 @@ async function testSesConnection(config) {
     return { success: false, latency, message, error: err.name }
   }
 }
-
-// Add SES test as separate IPC handler
-const { ipcMain: _ipc2 } = require('electron')
-_ipc2.handle('servers:testSes', async (_, config) => {
-  return testSesConnection(config)
-})
 
 module.exports = { registerServerHandlers, testSmtpConnection, testSesConnection }

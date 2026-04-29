@@ -251,9 +251,17 @@ export default function NewCampaign() {
         server_ids: JSON.stringify(campaign.server_ids),
         custom_smtp_list: JSON.stringify(campaign.custom_smtp_list || []),
       })
+      if (!created || !created.id) {
+        addToast('Failed to create campaign — please try again', 'error')
+        return
+      }
       if (!scheduleOnly) {
         const result = await window.api.sending.startCampaign(created.id)
-        if (!result.success) { addToast(result.error, 'error'); return }
+        if (!result) {
+          addToast('No response from sending engine — check server logs', 'error')
+          return
+        }
+        if (!result.success) { addToast(result.error || 'Failed to start campaign', 'error'); return }
         addToast(`Campaign started — sending to ${(selectedListInfo?.valid || 0).toLocaleString()} recipients`, 'success')
       } else {
         addToast('Campaign scheduled', 'success')

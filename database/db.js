@@ -26,6 +26,7 @@ function initialize() {
   
   runMigrations()
   fixEmailJobsSchema()
+  addMissingColumns()
   console.log(`[DB] Initialized at: ${dbPath}`)
   return db
 }
@@ -156,6 +157,25 @@ function runMigrations() {
       ('default_sending_mode', 'auto');
   `)
   console.log('[DB] Migrations complete')
+}
+
+function addMissingColumns() {
+  const migrations = [
+    { table: 'templates', column: 'attachments',      def: "TEXT DEFAULT '[]'" },
+    { table: 'contacts',  column: 'address',           def: 'TEXT' },
+    { table: 'campaigns', column: 'custom_smtp_list',  def: "TEXT DEFAULT '[]'" },
+  ]
+  for (const m of migrations) {
+    try {
+      const cols = db.prepare(`PRAGMA table_info(${m.table})`).all()
+      if (!cols.find(c => c.name === m.column)) {
+        db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.column} ${m.def}`)
+        console.log(`[DB] Added column ${m.table}.${m.column}`)
+      }
+    } catch (err) {
+      console.log(`[DB] Column migration note (${m.table}.${m.column}):`, err.message)
+    }
+  }
 }
 
 function fixEmailJobsSchema() {

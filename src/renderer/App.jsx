@@ -13,6 +13,47 @@ import ActivationScreen from './pages/ActivationScreen'
 import Toast from './components/ui/Toast'
 import { useAppStore } from './store/useAppStore'
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error, info) {
+    console.error('[Mailflow] UI render error:', error, info?.componentStack)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: 40, textAlign: 'center',
+          fontFamily: 'DM Sans, system-ui', color: '#5A5A72'
+        }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#C0392B', marginBottom: 8 }}>
+            Something went wrong
+          </div>
+          <div style={{ fontSize: 13, color: '#888', marginBottom: 20, maxWidth: 400, margin: '0 auto 20px' }}>
+            {this.state.error?.message || 'An unexpected error occurred'}
+          </div>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            style={{
+              padding: '8px 20px', background: '#4A3AFF', color: '#fff',
+              border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600
+            }}
+          >
+            Go Back
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 const PAGES = {
   dashboard:      Dashboard,
   campaigns:      Campaigns,
@@ -66,7 +107,7 @@ export default function App() {
       })
 
       // License expiring soon — show warning banner
-      window.api.on('license:expiringSoon', ({ daysRemaining, expiresAt }) => {
+      window.api.on('license:expiringSoon', ({ daysRemaining }) => {
         setExpiringSoonMsg(`⚠️ Your license expires in ${daysRemaining} day(s). Renew soon to avoid interruption.`)
       })
     }
@@ -153,7 +194,9 @@ export default function App() {
             </button>
           </div>
         )}
-        <PageComponent />
+        <ErrorBoundary key={activePage}>
+          <PageComponent />
+        </ErrorBoundary>
       </Layout>
       <Toast />
     </>

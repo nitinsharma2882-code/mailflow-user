@@ -11,7 +11,7 @@
     "build:secure": "node scripts/build-secure.js",
     "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && npm run dev:electron\"",
     "dev:react": "vite",
-    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev:electron": "cross-env NODE_ENV=development node scripts/electron-dev.js",
     "build": "npm run build:react && npm run build:electron",
     "build:react": "vite build",
     "build:electron": "electron-builder",
