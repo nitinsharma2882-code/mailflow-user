@@ -40,12 +40,9 @@ export default function Campaigns() {
 
     // Auto-refresh every 5s for running campaigns
     const interval = setInterval(() => {
-      setCampaigns(prev => {
-        if (!Array.isArray(prev)) return prev
-        const hasRunning = prev.some(c => c.status === 'running')
-        if (hasRunning) load()
-        return prev
-      })
+      const current = useAppStore.getState().campaigns
+      const hasRunning = Array.isArray(current) && current.some(c => c.status === 'running')
+      if (hasRunning) load()
     }, 5000)
 
     return () => {
