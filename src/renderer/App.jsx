@@ -29,7 +29,8 @@ class ErrorBoundary extends React.Component {
       return (
         <div style={{
           padding: 40, textAlign: 'center',
-          fontFamily: 'DM Sans, system-ui', color: '#5A5A72'
+          fontFamily: 'DM Sans, system-ui', color: '#5A5A72',
+          background: '#F7F7F8', minHeight: '100vh',
         }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 16, fontWeight: 600, color: '#C0392B', marginBottom: 8 }}>
@@ -84,12 +85,14 @@ export default function App() {
     checkLicenseStatus()
 
     if (window.api) {
-      // Campaign events
+      // Campaign events — single source of truth for progress updates
       window.api.on('sending:progress', (data) => {
         setCampaignProgress(data.campaignId, data)
         updateCampaign(data.campaignId, {
-          sent_count:   data.sent_count,
-          failed_count: data.failed_count,
+          sent_count:       data.sent_count,
+          failed_count:     data.failed_count,
+          open_count:       data.open_count,
+          total_recipients: data.total_recipients,
         })
       })
       window.api.on('campaign:statusChange', (id, status) => {

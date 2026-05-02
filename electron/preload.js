@@ -1,5 +1,22 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Maps each original callback → its ipcRenderer wrapper so off() can actually remove it
+const _listenerMap = new Map()
+
+const validChannels = [
+  'sending:progress',
+  'sending:complete',
+  'sending:error',
+  'sending:smtpQuota',
+  'queue:update',
+  'campaign:statusChange',
+  'customSmtp:progress',
+  'smtp:bulkProgress',
+  'license:expired',
+  'license:expiringSoon',
+  'tracking:open',
+]
+
 // Expose safe IPC API to renderer
 contextBridge.exposeInMainWorld('api', {
   // Campaigns
@@ -109,25 +126,19 @@ contextBridge.exposeInMainWorld('api', {
 
   // Listen for events from main process
   on: (channel, callback) => {
-    const validChannels = [
-      'sending:progress',
-      'sending:complete',
-      'sending:error',
-      'sending:smtpQuota',
-      'queue:update',
-      'campaign:statusChange',
-      'customSmtp:progress',
-      'smtp:bulkProgress',
-      'license:expired',
-      'license:expiringSoon',
-      'tracking:open',
-    ]
-    if (validChannels.includes(channel)) {
-      ipcRenderer.on(channel, (_, ...args) => callback(...args))
-    }
+    if (!validChannels.includes(channel)) return
+    const wrapper = (_, ...args) => callback(...args)
+    if (!_listenerMap.has(callback)) _listenerMap.set(callback, {})
+    _listenerMap.get(callback)[channel] = wrapper
+    ipcRenderer.on(channel, wrapper)
   },
 
   off: (channel, callback) => {
-    ipcRenderer.removeListener(channel, callback)
+    const wrappers = _listenerMap.get(callback)
+    if (wrappers && wrappers[channel]) {
+      ipcRenderer.removeListener(channel, wrappers[channel])
+      delete wrappers[channel]
+      if (Object.keys(wrappers).length === 0) _listenerMap.delete(callback)
+    }
   },
 })

@@ -22,20 +22,8 @@ export default function Campaigns() {
   useEffect(() => {
     load()
 
-    // Real-time progress updates
-    const onProgress = ({ campaignId, sent_count, failed_count, open_count, total_recipients }) => {
-      setCampaigns(prev => {
-        if (!Array.isArray(prev)) return prev
-        return prev.map(c =>
-          c.id === campaignId
-            ? { ...c, sent_count: sent_count||0, failed_count: failed_count||0, open_count: open_count||0, total_recipients: total_recipients||c.total_recipients }
-            : c
-        )
-      })
-    }
+    // campaign:statusChange triggers a full reload (fired when campaign completes/cancels)
     const onStatusChange = () => load()
-
-    window.api.on('sending:progress',    onProgress)
     window.api.on('campaign:statusChange', onStatusChange)
 
     // Auto-refresh every 5s for running campaigns
@@ -47,7 +35,6 @@ export default function Campaigns() {
 
     return () => {
       clearInterval(interval)
-      window.api.off('sending:progress',    onProgress)
       window.api.off('campaign:statusChange', onStatusChange)
     }
   }, [load])
