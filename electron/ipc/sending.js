@@ -312,7 +312,31 @@ async function startCampaign(campaignId) {
   let customSmtpList = []
   try { customSmtpList = JSON.parse(campaign.custom_smtp_list || '[]') } catch {}
 
-  if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+  if (sending_mode === 'aws_ses') {
+    const { decryptCredential } = require('./crypto')
+    const rawKey = campaign.aws_access_key || ''
+    const rawSecret = campaign.aws_secret_key || ''
+    const accessKeyId = rawKey.includes(':') ? decryptCredential(rawKey) : rawKey
+    const secretAccessKey = rawSecret.includes(':') ? decryptCredential(rawSecret) : rawSecret
+
+    if (!accessKeyId || !secretAccessKey) {
+      return { success: false, error: 'AWS SES credentials missing' }
+    }
+    servers = [{
+      type:         'api',
+      provider:     'ses',
+      api_key:      accessKeyId,
+      password:     secretAccessKey,
+      region:       campaign.aws_region || 'us-east-1',
+      from_email:   campaign.aws_sender_email || '',
+      email:        campaign.aws_sender_email || '',
+      name:         'AWS SES',
+      daily_limit:  50000,
+      per_min_limit: 14,
+      _isCustom:    false,
+    }]
+    console.log(`[Mailflow] AWS SES mode — region: ${campaign.aws_region || 'us-east-1'}, sender: ${campaign.aws_sender_email}`)
+  } else if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
     const validAccounts = customSmtpList.filter(a =>
       a.working !== false &&
       a.status !== 'failed' &&
@@ -392,7 +416,7 @@ async function startCampaign(campaignId) {
 }
 
 async function processBatch(campaignId) {
-  const BATCH_SIZE     = 20
+  const BATCH_SIZE     = 10
   const PARALLEL_LIMIT = 5
   const BATCH_DELAY_MS = 100
 
@@ -450,6 +474,9 @@ async function processBatch(campaignId) {
       if (state.cancelled || state.paused) break
       const chunk = jobs.slice(i, i + PARALLEL_LIMIT)
 
+      const stats = state.rotation.getStats()
+      console.log(`[Pool] ${stats.active}/${stats.total} SMTPs active (${stats.failed} failed, ${stats.quotaExceeded} quota)`)
+
       await Promise.all(chunk.map(async (job) => {
         const smtpEntry = state.rotation.getNext()
         if (!smtpEntry) {
@@ -462,13 +489,14 @@ async function processBatch(campaignId) {
           return
         }
 
+        console.log(`[Send] Starting ${job.id} → ${job.email} via ${smtpEntry.id}`)
+        const sendStart = Date.now()
         const serverId = smtpEntry.server._isCustom ? null : smtpEntry.id
         database.prepare(`UPDATE email_jobs SET status='sending', server_id=? WHERE id=?`).run(serverId, job.id)
 
         try {
           const customFields = JSON.parse(job.custom_fields || '{}')
 
-          // ── Personalization tags ─────────────────────────────────────────
           const recipientData = {
             name:    job.name    || job.email.split('@')[0] || '',
             email:   job.email   || '',
@@ -491,7 +519,7 @@ async function processBatch(campaignId) {
           const finalHtml   = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
           const plainText   = state.campaign.text_body || generateTextVersion(html)
 
-          await deliverEmail(smtpEntry.server, {
+          const result = await deliverEmail(smtpEntry.server, {
             to:          job.email,
             from:        fromAddress,
             subject:     subject,
@@ -501,16 +529,18 @@ async function processBatch(campaignId) {
             messageId:   msgId,
           })
 
+          if (!result) throw new Error('deliverEmail returned null — no response from transport')
+
           state.rotation.markSuccess(smtpEntry.id)
           database.prepare(`UPDATE email_jobs SET status='sent', sent_at=datetime('now'), attempts=attempts+1 WHERE id=?`).run(job.id)
           database.prepare(`UPDATE campaigns SET sent_count=sent_count+1, delivered_count=delivered_count+1 WHERE id=?`).run(campaignId)
           if (smtpEntry.server.id && !smtpEntry.server._isCustom) database.prepare(`UPDATE servers SET sent_today=sent_today+1 WHERE id=?`).run(smtpEntry.server.id)
           totalSent++
+          console.log(`[Send] ✅ Sent ${job.email} in ${Date.now() - sendStart}ms`)
 
         } catch (err) {
           var errMsg = err.message || 'Unknown error'
           var errLow = errMsg.toLowerCase()
-          console.log('[Mailflow] Send failed for ' + job.email + ': ' + errMsg)
 
           var isQuota    = isQuotaError(errMsg)
           var isInvalid  = errLow.includes('535') || errLow.includes('authentication') ||
@@ -518,6 +548,9 @@ async function processBatch(campaignId) {
                            errLow.includes('bad credentials') || errLow.includes('5.7.8')
           var isDisabled = errLow.includes('disabled') || errLow.includes('suspended') ||
                            errLow.includes('blocked') || errLow.includes('not allowed') || errLow.includes('policy')
+
+          var category = isQuota ? 'quota' : isInvalid ? 'auth' : isDisabled ? 'disabled' : 'error'
+          console.log(`[Send] ❌ Failed ${job.email} — ${category}: ${errMsg.substring(0, 120)}`)
 
           if (isQuota) {
             state.rotation.markFailure(smtpEntry.id, errMsg, true)
@@ -549,6 +582,8 @@ async function processBatch(campaignId) {
       }))
 
       emitProgress(campaignId)
+      // Yield event loop between chunks to keep Electron responsive
+      await new Promise(resolve => setImmediate(resolve))
     }
 
     await sleep(BATCH_DELAY_MS)
@@ -560,7 +595,7 @@ async function processBatch(campaignId) {
 function finalizeCampaign(campaignId) {
   try {
     const result = db.get().prepare(`SELECT sent_count, failed_count, total_recipients FROM campaigns WHERE id=?`).get(campaignId)
-    console.log(`[Mailflow] Campaign ${campaignId} DONE — sent: ${result?.sent_count}, failed: ${result?.failed_count}`)
+    console.log(`[Campaign] DONE — sent ${result?.sent_count}, failed ${result?.failed_count} of total ${result?.total_recipients}`)
     db.get().prepare(`UPDATE campaigns SET status='sent', completed_at=datetime('now') WHERE id=?`).run(campaignId)
     runningCampaigns.delete(campaignId)
     BrowserWindow.getAllWindows().forEach(w => {

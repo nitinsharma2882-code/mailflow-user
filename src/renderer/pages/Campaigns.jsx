@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { SectionHeader, Badge, ProgressBar } from '../components/ui/UI'
 import Button from '../components/ui/Button'
@@ -6,7 +6,7 @@ import Button from '../components/ui/Button'
 const RAILWAY_URL = 'https://mailflow-tracking-server-production.up.railway.app'
 const ADMIN_KEY   = 'mailflow-admin-2026'
 
-export default function Campaigns() {
+function Campaigns() {
   const { campaigns, setCampaigns, setActivePage, addToast } = useAppStore()
   const [filter, setFilter]       = useState('all')
   const [openersPanel, setOpenersPanel] = useState(null) // { campaignId, campaignName }
@@ -40,39 +40,42 @@ export default function Campaigns() {
   }, [load])
 
   const safeCampaigns = Array.isArray(campaigns) ? campaigns : []
-  const filtered = filter === 'all' ? safeCampaigns : safeCampaigns.filter(c => c.status === filter)
+  const filtered = useMemo(
+    () => filter === 'all' ? safeCampaigns : safeCampaigns.filter(c => c.status === filter),
+    [safeCampaigns, filter]
+  )
 
-  async function handlePause(id) {
+  const handlePause = useCallback(async (id) => {
     await window.api.sending.pauseCampaign(id)
     addToast('Campaign paused')
     load()
-  }
+  }, [load, addToast])
 
-  async function handleResume(id) {
+  const handleResume = useCallback(async (id) => {
     await window.api.sending.resumeCampaign(id)
     addToast('Campaign resumed', 'success')
     load()
-  }
+  }, [load, addToast])
 
-  async function handleCancel(id) {
+  const handleCancel = useCallback(async (id) => {
     if (!confirm('Cancel this campaign? Remaining emails will not be sent.')) return
     await window.api.sending.cancelCampaign(id)
     addToast('Campaign cancelled')
     load()
-  }
+  }, [load, addToast])
 
-  async function handleDelete(id) {
+  const handleDelete = useCallback(async (id) => {
     if (!confirm('Delete this campaign and all its data?')) return
     await window.api.campaigns.delete(id)
     addToast('Campaign deleted')
     load()
-  }
+  }, [load, addToast])
 
-  async function handleExport(id, type) {
+  const handleExport = useCallback(async (id, type) => {
     const result = await window.api.sending.exportResults(id, type)
     if (result && result.success) addToast('Downloaded ' + result.count + ' rows', 'success')
     else if (result && !result.cancelled) addToast('No data found for export', 'error')
-  }
+  }, [addToast])
 
   async function handleShowOpeners(campaign) {
     setOpenersPanel({ campaignId: campaign.id, campaignName: campaign.name })
@@ -87,7 +90,7 @@ export default function Campaigns() {
         const data = await res.json()
         setOpeners(data.openers || [])
       }
-    } catch {}
+    } catch { /* network error — skip */ }
 
     // Also fetch from local analytics
     try {
@@ -102,7 +105,7 @@ export default function Campaigns() {
           return merged
         })
       }
-    } catch {}
+    } catch { /* local analytics error — skip */ }
     setOpenersLoading(false)
   }
 
@@ -305,3 +308,5 @@ export default function Campaigns() {
     </div>
   )
 }
+
+export default React.memo(Campaigns)

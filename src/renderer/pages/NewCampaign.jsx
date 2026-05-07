@@ -4,9 +4,9 @@ import { Card } from '../components/ui/UI'
 import Button from '../components/ui/Button'
 import styles from './Pages.module.css'
 
-const STEPS = ['Campaign', 'Recipients', 'Template', 'SMTP / Server', 'Preview & Send']
+const STEPS = ['Recipients', 'Template', 'SMTP / Server', 'Preview & Send']
 
-export default function NewCampaign() {
+function NewCampaign() {
   const { contactLists, setContactLists, templates, setTemplates,
           servers, setServers, addToast, setActivePage } = useAppStore()
 
@@ -15,6 +15,7 @@ export default function NewCampaign() {
     name: '', contact_list_id: '', template_id: '',
     server_ids: [], sending_mode: 'existing_server',
     scheduled_at: '', custom_smtp_list: [],
+    aws_access_key: '', aws_secret_key: '', aws_region: 'us-east-1', aws_sender_email: '',
   })
   const [preview, setPreview]               = useState([])
   const [selectedListInfo, setSelectedListInfo] = useState(null)
@@ -77,7 +78,7 @@ export default function NewCampaign() {
     if (result.canceled || !result.filePaths[0]) return
     setImporting(true)
     try {
-      const listName = campaign.name || 'Imported list'
+      const listName = 'Imported list'
       const data = await window.api.contacts.importCSV(result.filePaths[0], listName)
       setCampaign(c => ({ ...c, contact_list_id: data.listId }))
       setSelectedListInfo({ total: data.total, valid: data.valid, invalid: data.invalid })
@@ -136,7 +137,7 @@ export default function NewCampaign() {
         }
         resolve()
       }
-      input.oncancel = () => { try { document.body.removeChild(input) } catch {} resolve() }
+      input.oncancel = () => { try { document.body.removeChild(input) } catch { /* ignore */ } resolve() }
       input.click()
     })
   }
@@ -229,7 +230,6 @@ export default function NewCampaign() {
 
   // ── Launch ──
   async function handleLaunch(scheduleOnly = false) {
-    if (!campaign.name)            { addToast('Enter a campaign name', 'error'); return }
     if (!campaign.contact_list_id) { addToast('Select a contact list', 'error'); return }
     if (!campaign.template_id)     { addToast('Select a template', 'error'); return }
     if (campaign.sending_mode === 'existing_server' && !campaign.server_ids.length) {
@@ -238,13 +238,16 @@ export default function NewCampaign() {
     if (campaign.sending_mode === 'custom_smtp' && !campaign.custom_smtp_list?.length) {
       addToast('Upload and validate SMTP accounts first', 'error'); return
     }
+    if (campaign.sending_mode === 'aws_ses' && (!campaign.aws_access_key || !campaign.aws_secret_key || !campaign.aws_sender_email)) {
+      addToast('Enter all AWS SES credentials', 'error'); return
+    }
     setLaunching(true)
     try {
-      const latestTemplateId = campaign.template_id
+      const autoName = campaign.name || `Campaign ${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}`
 
       const created = await window.api.campaigns.create({
         ...campaign,
-        template_id: latestTemplateId,
+        name: autoName,
         status: scheduleOnly ? 'scheduled' : 'draft',
         total_recipients: selectedListInfo?.total || 0,
         server_ids: JSON.stringify(campaign.server_ids),
@@ -284,12 +287,12 @@ export default function NewCampaign() {
   }
 
   function canAdvance() {
-    if (step === 1) return !!campaign.name
-    if (step === 2) return !!campaign.contact_list_id
-    if (step === 3) return !!campaign.template_id
-    if (step === 4) {
+    if (step === 1) return !!campaign.contact_list_id
+    if (step === 2) return !!campaign.template_id
+    if (step === 3) {
       if (campaign.sending_mode === 'existing_server') return campaign.server_ids.length > 0
       if (campaign.sending_mode === 'custom_smtp') return campaign.custom_smtp_list?.length > 0
+      if (campaign.sending_mode === 'aws_ses') return !!(campaign.aws_access_key && campaign.aws_secret_key && campaign.aws_region && campaign.aws_sender_email)
     }
     return true
   }
@@ -297,17 +300,17 @@ export default function NewCampaign() {
   const selectedTemplate = templates.find(t => t.id === campaign.template_id)
   const [fullTemplate, setFullTemplate] = React.useState(null)
 
-  // Load full template (with html_body + attachments) when template changes or step reaches 5
+  // Load full template (with html_body + attachments) when template changes or step reaches 4
   React.useEffect(() => {
-    if (campaign.template_id && step === 5) {
+    if (campaign.template_id && step === 4) {
       window.api.templates.getById(campaign.template_id).then(t => {
         setFullTemplate(t)
       }).catch(() => setFullTemplate(selectedTemplate))
     }
   }, [campaign.template_id, step])
 
-  // Use fullTemplate on step 5, selectedTemplate elsewhere
-  const previewTemplate = step === 5 ? (fullTemplate || selectedTemplate) : selectedTemplate
+  // Use fullTemplate on step 4, selectedTemplate elsewhere
+  const previewTemplate = step === 4 ? (fullTemplate || selectedTemplate) : selectedTemplate
 
   const IS = {
     width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
@@ -345,28 +348,8 @@ export default function NewCampaign() {
         </div>
       )}
 
-      {/* ── Step 1: Campaign ── */}
+      {/* ── Step 1: Recipients ── */}
       {step === 1 && (
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Create Campaign</div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 6 }}>Campaign Name *</label>
-            <input style={{ ...IS, maxWidth: 420 }} placeholder="e.g. May Newsletter 2026"
-              value={campaign.name} onChange={e => setCampaign(c => ({ ...c, name: e.target.value }))} />
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 6 }}>
-              Schedule (optional — leave blank to start immediately)
-            </label>
-            <input type="datetime-local" value={campaign.scheduled_at}
-              onChange={e => setCampaign(c => ({ ...c, scheduled_at: e.target.value }))}
-              style={{ ...IS, maxWidth: 300 }} />
-          </div>
-        </div>
-      )}
-
-      {/* ── Step 2: Recipients ── */}
-      {step === 2 && (
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Add Recipients</div>
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)',
@@ -468,26 +451,27 @@ export default function NewCampaign() {
         </div>
       )}
 
-      {/* ── Step 3: Template ── */}
-      {step === 3 && (
+      {/* ── Step 2: Template ── */}
+      {step === 2 && (
         <Step3Template
           templates={templates}
           setTemplates={setTemplates}
           campaign={campaign}
           setCampaign={setCampaign}
           addToast={addToast}
-          onNext={() => setStep(4)}
+          onNext={() => setStep(3)}
         />
       )}
 
-      {/* ── Step 4: SMTP / Server ── */}
-      {step === 4 && (
+      {/* ── Step 3: SMTP / Server ── */}
+      {step === 3 && (
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Add SMTP / Server</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
             {[
               { value: 'existing_server', title: '🖥 Use Existing Server', desc: 'Use configured SMTP/API servers' },
-              { value: 'custom_smtp',     title: '📧 Upload SMTP CSV',     desc: 'Gmail, Outlook, iCloud via CSV' }
+              { value: 'custom_smtp',     title: '📧 Upload SMTP CSV',     desc: 'Gmail, Outlook, iCloud via CSV' },
+              { value: 'aws_ses',         title: '☁️ AWS SES',             desc: 'Amazon Simple Email Service' },
             ].map(m => (
               <div key={m.value} onClick={() => setCampaign(c => ({ ...c, sending_mode: m.value }))}
                 style={{ padding: '16px', borderRadius: 'var(--rad-l)', cursor: 'pointer',
@@ -526,6 +510,10 @@ export default function NewCampaign() {
                 )
               })}
             </div>
+          )}
+
+          {campaign.sending_mode === 'aws_ses' && (
+            <AwsSesForm campaign={campaign} setCampaign={setCampaign} addToast={addToast} IS={IS} />
           )}
 
           {campaign.sending_mode === 'custom_smtp' && (
@@ -635,8 +623,8 @@ export default function NewCampaign() {
         </div>
       )}
 
-      {/* ── Step 5: Preview & Send ── */}
-      {step === 5 && (
+      {/* ── Step 4: Preview & Send ── */}
+      {step === 4 && (
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Preview & Send</div>
 
@@ -668,6 +656,8 @@ export default function NewCampaign() {
                       from: <span style={{ color: '#202124' }}>
                         {campaign.sending_mode === 'custom_smtp' && campaign.custom_smtp_list?.length > 0
                           ? campaign.custom_smtp_list[0]?.email
+                          : campaign.sending_mode === 'aws_ses'
+                          ? campaign.aws_sender_email || 'sender@example.com'
                           : servers.find(s => campaign.server_ids.includes(s.id))?.from_email || 'sender@example.com'}
                       </span>
                     </div>
@@ -689,7 +679,7 @@ export default function NewCampaign() {
                     try {
                       const h = e.target.contentDocument.body.scrollHeight
                       e.target.style.height = Math.min(Math.max(h + 40, 300), 600) + 'px'
-                    } catch {}
+                    } catch { /* cross-origin iframe — ignore */ }
                   }}
                   sandbox="allow-same-origin"
                   title="Email Preview"
@@ -743,6 +733,8 @@ export default function NewCampaign() {
                 ['Template',        previewTemplate?.name || selectedTemplate?.name || '—'],
                 ['Sending Method',  campaign.sending_mode === 'custom_smtp'
                   ? `Custom SMTP (${campaign.custom_smtp_list?.length || 0} accounts)`
+                  : campaign.sending_mode === 'aws_ses'
+                  ? `AWS SES (${campaign.aws_region || 'us-east-1'})`
                   : `${campaign.server_ids.length} server(s)`],
                 ['Schedule',        campaign.scheduled_at || 'Start immediately'],
                 ['Open Tracking',   '✅ Enabled'],
@@ -771,8 +763,8 @@ export default function NewCampaign() {
           <div className={styles.checkList} style={{ marginBottom: 20 }}>
             <CheckItem ok={!!campaign.contact_list_id} text={selectedListInfo ? `${selectedListInfo.valid?.toLocaleString()} valid recipients · ${selectedListInfo.invalid?.toLocaleString()} invalid skipped` : 'No contact list'} />
             <CheckItem ok={!!campaign.template_id} text={selectedTemplate ? `Template: "${selectedTemplate.name}"` : 'No template selected'} />
-            <CheckItem ok={campaign.sending_mode === 'custom_smtp' ? campaign.custom_smtp_list?.length > 0 : campaign.server_ids.length > 0}
-              text={campaign.sending_mode === 'custom_smtp' ? `${campaign.custom_smtp_list?.length || 0} SMTP accounts (round-robin)` : `${campaign.server_ids.length} server(s) selected`} />
+            <CheckItem ok={campaign.sending_mode === 'custom_smtp' ? campaign.custom_smtp_list?.length > 0 : campaign.sending_mode === 'aws_ses' ? !!(campaign.aws_access_key && campaign.aws_secret_key && campaign.aws_sender_email) : campaign.server_ids.length > 0}
+              text={campaign.sending_mode === 'custom_smtp' ? `${campaign.custom_smtp_list?.length || 0} SMTP accounts (round-robin)` : campaign.sending_mode === 'aws_ses' ? `AWS SES · ${campaign.aws_region || 'us-east-1'} · ${campaign.aws_sender_email || 'no sender set'}` : `${campaign.server_ids.length} server(s) selected`} />
           </div>
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -786,7 +778,104 @@ export default function NewCampaign() {
       {/* Step nav */}
       <div className={styles.stepNav}>
         <Button variant="ghost" onClick={() => setStep(s => s - 1)} style={{ visibility: step === 1 ? 'hidden' : 'visible' }}>← Back</Button>
-        {step < 5 && <Button variant="primary" onClick={() => setStep(s => s + 1)} disabled={!canAdvance()}>Continue →</Button>}
+        {step < 4 && <Button variant="primary" onClick={() => setStep(s => s + 1)} disabled={!canAdvance()}>Continue →</Button>}
+      </div>
+    </div>
+  )
+}
+
+export default React.memo(NewCampaign)
+
+// ── AWS SES Form Component ────────────────────────────────────────────────────
+function AwsSesForm({ campaign, setCampaign, addToast, IS }) {
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState(null)
+
+  const AWS_REGIONS = [
+    'us-east-1','us-east-2','us-west-1','us-west-2',
+    'eu-west-1','eu-west-2','eu-west-3','eu-central-1',
+    'ap-southeast-1','ap-southeast-2','ap-northeast-1','ap-south-1',
+    'ca-central-1','sa-east-1',
+  ]
+
+  async function handleTestSes() {
+    if (!campaign.aws_access_key || !campaign.aws_secret_key) {
+      addToast('Enter Access Key ID and Secret Access Key first', 'error'); return
+    }
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await window.api.servers.testSes({
+        api_key:    campaign.aws_access_key,
+        password:   campaign.aws_secret_key,
+        region:     campaign.aws_region || 'us-east-1',
+        from_email: campaign.aws_sender_email,
+      })
+      setTestResult(result)
+      if (result.success) addToast('AWS SES connected successfully', 'success')
+      else addToast('SES test failed: ' + result.message, 'error')
+    } catch (err) {
+      addToast('Test error: ' + err.message, 'error')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>Access Key ID *</label>
+          <input style={IS} placeholder="AKIAIOSFODNN7EXAMPLE"
+            value={campaign.aws_access_key}
+            onChange={e => setCampaign(c => ({ ...c, aws_access_key: e.target.value.trim() }))} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>Secret Access Key *</label>
+          <input type="password" style={IS} placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            value={campaign.aws_secret_key}
+            onChange={e => setCampaign(c => ({ ...c, aws_secret_key: e.target.value.trim() }))} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>Region *</label>
+          <select style={IS} value={campaign.aws_region || 'us-east-1'}
+            onChange={e => setCampaign(c => ({ ...c, aws_region: e.target.value }))}>
+            {AWS_REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>Verified Sender Email *</label>
+          <input style={IS} placeholder="sender@yourdomain.com"
+            value={campaign.aws_sender_email}
+            onChange={e => setCampaign(c => ({ ...c, aws_sender_email: e.target.value.trim() }))} />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <button onClick={handleTestSes} disabled={testing}
+          style={{ padding: '8px 18px', background: 'var(--pu)', color: '#fff', border: 'none', borderRadius: 'var(--rad)', fontSize: 13, fontWeight: 600, cursor: testing ? 'not-allowed' : 'pointer' }}>
+          {testing ? 'Testing...' : '🔌 Test SES Connection'}
+        </button>
+      </div>
+
+      {testResult && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 'var(--rad)', fontSize: 12, marginBottom: 12,
+          background: testResult.success ? 'var(--gr-l)' : 'var(--re-l)',
+          border: `1px solid ${testResult.success ? 'var(--gr)' : 'var(--re)'}`,
+          color: testResult.success ? 'var(--gr)' : 'var(--re)',
+        }}>
+          {testResult.success ? '✅ ' : '❌ '}{testResult.message}
+          {testResult.quota && (
+            <div style={{ marginTop: 4, color: 'var(--txt2)', fontSize: 11 }}>
+              Daily quota: {testResult.quota.max24Hour?.toLocaleString()} · Rate: {testResult.quota.maxRate}/sec · Used today: {testResult.quota.sentLast24h?.toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: 'var(--txt3)' }}>
+        Credentials are encrypted before use. Ensure your sender email is verified in AWS SES console.
       </div>
     </div>
   )
@@ -908,7 +997,7 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
         }
         resolve()
       }
-      input.oncancel = () => { try { document.body.removeChild(input) } catch {} resolve() }
+      input.oncancel = () => { try { document.body.removeChild(input) } catch { /* ignore */ } resolve() }
       input.click()
     })
   }
