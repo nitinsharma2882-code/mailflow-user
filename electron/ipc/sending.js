@@ -273,6 +273,7 @@ function registerSendingHandlers() {
 function buildCustomSmtpServer(account) {
   const config = getSmtpConfig(account.email)
   const port   = account.port || config?.port || 587
+  console.log(`[buildCustomSmtpServer] email=${account.email} host=${account.host || config?.host} passLen=${(account.app_password||account.password||'').length}`)
   return {
     type:         'smtp',
     host:         account.host || config?.host || ('smtp.' + account.email.split('@')[1]),
@@ -359,6 +360,7 @@ async function startCampaign(campaignId) {
 
     servers = validAccounts.map(buildCustomSmtpServer)
     console.log('[Mailflow] Built ' + servers.length + ' SMTP server configs')
+    servers.forEach((s, i) => console.log(`  [server ${i}] email=${s.email} host=${s.host} port=${s.port} passLen=${(s.password||'').length}`))
   } else {
     let serverIds = campaign.server_ids || '[]'
     if (typeof serverIds === 'string') { try { serverIds = JSON.parse(serverIds) } catch { serverIds = [] } }
@@ -370,6 +372,7 @@ async function startCampaign(campaignId) {
       servers = database.prepare(`SELECT * FROM servers WHERE status='active'`).all()
     }
     console.log(`[Mailflow] Using ${servers.length} configured servers`)
+    servers.forEach((s, i) => console.log(`  [server ${i}] email=${s.email} host=${s.host} port=${s.port} passLen=${(s.password||'').length}`))
   }
 
   if (servers.length === 0) return { success: false, error: 'No active servers available' }
@@ -500,10 +503,8 @@ async function processBatch(campaignId) {
           const recipientData = {
             name:    job.name    || job.email.split('@')[0] || '',
             email:   job.email   || '',
-            address: job.address || customFields.address || customFields.st || '',
-            st:      job.address || customFields.address || customFields.st || '',
-            id:      job.contact_id || customFields.id || '',
-            ...customFields,
+            address: job.address || '',
+            st:      job.address || '',
           }
 
           const html    = mergeTemplate(state.campaign.html_body, recipientData)
@@ -686,6 +687,7 @@ async function sendViaSes(server, mailOptions) {
 }
 
 async function deliverEmail(server, mailOptions) {
+  console.log(`[deliverEmail] type=${server.type} host=${server.host} email=${server.email} passLen=${(server.password||'').length}`)
   if (server.type === 'smtp') {
     var crypto = require('crypto')
     var host = server.host || ''
@@ -741,6 +743,7 @@ async function deliverEmail(server, mailOptions) {
     if (attachments.length > 0) finalOptions.attachments = attachments
     else delete finalOptions.attachments
     const result = await transporter.sendMail(finalOptions)
+    console.log(`[deliverEmail] sendMail result: ${JSON.stringify({ messageId: result.messageId, response: result.response })}`)
     transporter.close()
     return result
   }
@@ -766,7 +769,12 @@ async function deliverEmail(server, mailOptions) {
 
 function mergeTemplate(template, data) {
   if (!template) return ''
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => (data[key] !== undefined && data[key] !== null) ? String(data[key]) : '')
+  return template
+    .replace(/\{\{name\}\}/gi,  data.name    || '')
+    .replace(/\{\{email\}\}/gi, data.email   || '')
+    .replace(/\{\{st\}\}/gi,    data.address || data.st || '')
+    .replace(/\{\{id\}\}/gi,    require('crypto').randomBytes(8).toString('hex'))
+    .replace(/\{\{[^}]+\}\}/g,  '')
 }
 
 function generateTextVersion(html) {

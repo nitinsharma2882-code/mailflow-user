@@ -424,49 +424,37 @@ function NewCampaign() {
           {preview.length > 0 && (
             <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden' }}>
               <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--bdr)', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)' }}>All Recipients ({preview.length.toLocaleString()})</span>
-                <span style={{ fontSize: 11, color: 'var(--txt3)' }}>Scroll to view all</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)' }}>Template Variables Preview ({preview.length.toLocaleString()} recipients)</span>
+                <span style={{ fontSize: 11, color: 'var(--txt3)' }}>How tags will be replaced per recipient</span>
               </div>
               <div style={{ maxHeight: 380, overflowY: 'auto', overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                     <tr style={{ background: 'var(--bg3)' }}>
-                      {['#','Email','Name','Address','Custom Field','Status'].map(h => (
+                      {['{{email}}','{{name}}','{{st}}','{{id}}'].map(h => (
                         <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600,
-                          color: 'var(--txt2)', borderBottom: '1px solid var(--bdr)',
-                          fontSize: 11, textTransform: 'uppercase', whiteSpace: 'nowrap', background: 'var(--bg3)' }}>{h}</th>
+                          color: 'var(--pu)', borderBottom: '1px solid var(--bdr)',
+                          fontSize: 11, fontFamily: 'monospace', background: 'var(--bg3)' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.map((row, i) => {
-                      const email   = typeof row.email        === 'object' ? JSON.stringify(row.email)        : (row.email        || '')
-                      const name    = typeof row.name         === 'object' ? JSON.stringify(row.name)         : (row.name         || '—')
-                      const address = typeof row.address      === 'object' ? JSON.stringify(row.address)      : (row.address      || '—')
-                      const custom  = typeof row.custom_field === 'object' ? JSON.stringify(row.custom_field) : (row.custom_field || '—')
-                      const status  = row.status || 'valid'
-                      return (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--bdr)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
-                          <td style={{ padding: '7px 14px', color: 'var(--txt3)', fontSize: 11 }}>{i + 1}</td>
-                          <td style={{ padding: '7px 14px', fontFamily: 'monospace', fontSize: 11 }}>{email}</td>
-                          <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{name}</td>
-                          <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{address}</td>
-                          <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{custom}</td>
-                          <td style={{ padding: '7px 14px' }}>
-                            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 20,
-                              background: status === 'valid' ? 'var(--gr-l)' : 'var(--re-l)',
-                              color: status === 'valid' ? 'var(--gr)' : 'var(--re)' }}>{status}</span>
-                          </td>
-                        </tr>
-                      )
-                    })}
+                    {preview.slice(0, 50).map((c, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--bdr)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                        <td style={{ padding: '7px 14px', fontFamily: 'monospace', fontSize: 11 }}>{c.email || ''}</td>
+                        <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{c.name || '—'}</td>
+                        <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{c.address || '—'}</td>
+                        <td style={{ padding: '7px 14px', color: 'var(--txt3)', fontStyle: 'italic', fontSize: 11 }}>auto-generated</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-              <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--txt3)', borderTop: '1px solid var(--bdr)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>{selectedListInfo?.valid?.toLocaleString()} valid · {selectedListInfo?.invalid?.toLocaleString()} invalid</span>
-                <span>Showing first {preview.length.toLocaleString()} of {(selectedListInfo?.total || preview.length).toLocaleString()} contacts</span>
-              </div>
+              {preview.length > 50 && (
+                <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--txt3)', borderTop: '1px solid var(--bdr)' }}>
+                  Showing 50 of {preview.length.toLocaleString()} recipients
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1169,7 +1157,7 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
         <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt2)', display: 'block', marginBottom: 5 }}>Email body (HTML) *</label>
         <div style={{ border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', marginBottom: 12 }}>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', padding: '8px', background: 'var(--bg3)', borderBottom: '1px solid var(--bdr)', borderRadius: 'var(--rad) var(--rad) 0 0' }}>
-            {['name', 'email', 'company', 'city', 'tag'].map(v => (
+            {['name', 'email', 'st', 'id'].map(v => (
               <button key={v} onClick={() => insertVar(v)}
                 style={{ padding: '3px 8px', fontSize: 11, border: '1px solid var(--pu-m)', borderRadius: 4, background: 'var(--pu-l)', color: 'var(--pu)', cursor: 'pointer', fontFamily: 'var(--font)' }}>
                 {`{{${v}}}`}
