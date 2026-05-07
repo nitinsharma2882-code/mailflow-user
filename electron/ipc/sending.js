@@ -511,12 +511,27 @@ async function processBatch(campaignId) {
           const subject = mergeTemplate(state.campaign.subject,   recipientData)
 
           let templateAttachments = []
-          try { templateAttachments = JSON.parse(state.campaign.attachments || '[]') } catch {}
+          try {
+            const rawAtts = JSON.parse(state.campaign.attachments || '[]')
+            if (Array.isArray(rawAtts) && rawAtts.length > 0) {
+              templateAttachments = await processAttachments(rawAtts)
+            }
+          } catch(e) {
+            console.log('[Send] attachment parse error, sending without attachments:', e.message)
+            templateAttachments = []
+          }
 
           const fromEmail   = smtpEntry.server.from_email || smtpEntry.server.email || ''
           const fromName    = state.campaign.from_name || ''
           const fromAddress = fromName ? `${fromName} <${fromEmail}>` : fromEmail
-          const msgId       = buildMessageId(fromEmail)
+
+          if (!fromEmail) {
+            console.error('[Send] ❌ fromEmail is empty — cannot send. Check server config.')
+            database.prepare("UPDATE email_jobs SET status='failed', error='fromEmail is empty' WHERE id=?").run(job.id)
+            database.prepare("UPDATE campaigns SET failed_count=failed_count+1 WHERE id=?").run(campaignId)
+            return
+          }
+
           const finalHtml   = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
           const plainText   = state.campaign.text_body || generateTextVersion(html)
 
@@ -527,7 +542,6 @@ async function processBatch(campaignId) {
             html:        finalHtml,
             text:        plainText,
             attachments: templateAttachments,
-            messageId:   msgId,
           })
 
           if (!result) throw new Error('deliverEmail returned null — no response from transport')
@@ -701,6 +715,7 @@ async function deliverEmail(server, mailOptions) {
     var transportConfig = {
       host: host, port: portNum, secure: isSSL, requireTLS: isTLS,
       auth: { user: server.email, pass: server.password },
+      debug: true, logger: true,
       connectionTimeout: 25000, greetingTimeout: 20000, socketTimeout: 25000,
       tls: { rejectUnauthorized: false, minVersion: 'TLSv1' }
     }
@@ -711,7 +726,7 @@ async function deliverEmail(server, mailOptions) {
       ].join(':')
     }
     const transporter = nodemailer.createTransport(transportConfig)
-    const attachments = await processAttachments(mailOptions.attachments || [])
+    const attachments = mailOptions.attachments || []
     var fromEmail  = server.from_email || server.email || ''
     var fromDomain = fromEmail.split('@')[1] || 'mailflow.app'
     var uniqueRef  = crypto.randomBytes(16).toString('hex')
@@ -736,14 +751,23 @@ async function deliverEmail(server, mailOptions) {
     }
     if (isGmail) { headers['X-Mailer'] = 'Google Gmail'; headers['X-Google-DKIM-Signature'] = 'bypass' }
     if (!isMicrosoft && !isGmail) headers['X-Mailer'] = 'Mailflow/2.0'
-    var finalOptions = Object.assign({}, mailOptions, {
-      headers: headers, messageId: msgId,
-      text: mailOptions.text || generateTextVersion(mailOptions.html || ''),
-    })
-    if (attachments.length > 0) finalOptions.attachments = attachments
-    else delete finalOptions.attachments
-    const result = await transporter.sendMail(finalOptions)
-    console.log(`[deliverEmail] sendMail result: ${JSON.stringify({ messageId: result.messageId, response: result.response })}`)
+    const mailPayload = {
+      from:    mailOptions.from,
+      to:      mailOptions.to,
+      subject: mailOptions.subject,
+      html:    mailOptions.html,
+      text:    mailOptions.text || generateTextVersion(mailOptions.html || ''),
+      headers: headers,
+    }
+    if (attachments.length > 0) mailPayload.attachments = attachments
+    const result = await transporter.sendMail(mailPayload)
+    console.log(`[deliverEmail] sendMail result: ${JSON.stringify({ messageId: result.messageId, response: result.response, accepted: result.accepted, rejected: result.rejected })}`)
+    if (result.rejected && result.rejected.length > 0) {
+      throw new Error('Recipient rejected by SMTP server: ' + result.rejected.join(', '))
+    }
+    if (!result.accepted || result.accepted.length === 0) {
+      throw new Error('Email not accepted by SMTP server. Response: ' + result.response)
+    }
     transporter.close()
     return result
   }
@@ -793,11 +817,10 @@ function buildMessageId(fromEmail) {
   return '<' + Date.now().toString(36) + '.' + Math.random().toString(36).substring(2) + '@' + domain + '>'
 }
 
-function injectTrackingPixel(html, jobId, trackingDomain) {
+function injectTrackingPixel(html, jobId, trackingUrl) {
   if (!html || !jobId) return html
-  const domain = (trackingDomain || 'http://localhost:3001').replace(/\/$/, '')
-  const ts = Date.now()
-  const pixel = '<img src="' + domain + '/track/open/' + jobId + '?t=' + ts + '" width="1" height="1" style="display:none !important;border:0;outline:0;max-height:1px;max-width:1px;opacity:0;" alt="" />'
+  if (!trackingUrl || !trackingUrl.startsWith('http')) return html
+  const pixel = '<img src="' + trackingUrl + '/track/open/' + jobId + '" width="1" height="1" style="display:none" alt="" />'
   if (html.includes('</body>')) return html.replace('</body>', pixel + '</body>')
   if (html.includes('</html>')) return html.replace('</html>', pixel + '</html>')
   return html + pixel
