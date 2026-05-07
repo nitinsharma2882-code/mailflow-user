@@ -7,7 +7,7 @@ const RAILWAY_URL = 'https://mailflow-tracking-server-production.up.railway.app'
 const ADMIN_KEY   = 'mailflow-admin-2026'
 
 function Campaigns() {
-  const { campaigns, setCampaigns, setActivePage, addToast } = useAppStore()
+  const { campaigns, setCampaigns, setActivePage, addToast, setResendCampaign } = useAppStore()
   const [filter, setFilter]       = useState('all')
   const [openersPanel, setOpenersPanel] = useState(null) // { campaignId, campaignName }
   const [openers, setOpeners]     = useState([])
@@ -76,6 +76,27 @@ function Campaigns() {
     if (result && result.success) addToast('Downloaded ' + result.count + ' rows', 'success')
     else if (result && !result.cancelled) addToast('No data found for export', 'error')
   }, [addToast])
+
+  const handleResend = useCallback(async (campaign) => {
+    try {
+      const full = await window.api.campaigns.getById(campaign.id)
+      const data = full || campaign
+      setResendCampaign({
+        contact_list_id:  data.contact_list_id  || campaign.contact_list_id  || '',
+        template_id:      data.template_id       || campaign.template_id       || '',
+        server_ids:       data.server_ids        || campaign.server_ids        || '[]',
+        sending_mode:     data.sending_mode      || campaign.sending_mode      || 'existing_server',
+        custom_smtp_list: data.custom_smtp_list  || campaign.custom_smtp_list  || '[]',
+        aws_access_key:   data.aws_access_key    || '',
+        aws_secret_key:   data.aws_secret_key    || '',
+        aws_region:       data.aws_region        || 'us-east-1',
+        aws_sender_email: data.aws_sender_email  || '',
+      })
+      setActivePage('new-campaign')
+    } catch (err) {
+      addToast('Failed to load campaign: ' + err.message, 'error')
+    }
+  }, [setResendCampaign, setActivePage, addToast])
 
   async function handleShowOpeners(campaign) {
     setOpenersPanel({ campaignId: campaign.id, campaignName: campaign.name })
@@ -252,6 +273,7 @@ function Campaigns() {
                   </Button>
                 </>
               )}
+              <Button size="sm" variant="ghost" onClick={() => handleResend(c)}>🔁 Resend</Button>
               <Button size="sm" variant="ghost-danger" onClick={() => handleDelete(c.id)}>🗑 Delete</Button>
             </div>
           </div>

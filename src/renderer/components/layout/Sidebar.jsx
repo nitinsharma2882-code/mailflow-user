@@ -14,11 +14,7 @@ const NAV = [
   {
     section: 'Tools',
     items: [
-      { id: 'contacts', label: 'Contacts', icon: IconUsers },
       { id: 'servers', label: 'Servers', icon: IconServer },
-      { id: 'templates', label: 'Templates', icon: IconTemplate },
-      { id: 'analytics', label: 'Analytics', icon: IconChart },
-      { id: 'verify', label: 'Email verify', icon: IconShield },
       { id: 'smtp', label: 'SMTP tester', icon: IconCheck },
     ]
   }

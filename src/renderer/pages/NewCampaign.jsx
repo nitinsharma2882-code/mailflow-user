@@ -8,7 +8,8 @@ const STEPS = ['Recipients', 'Template', 'SMTP / Server', 'Preview & Send']
 
 function NewCampaign() {
   const { contactLists, setContactLists, templates, setTemplates,
-          servers, setServers, addToast, setActivePage } = useAppStore()
+          servers, setServers, addToast, setActivePage,
+          resendCampaign, clearResendCampaign } = useAppStore()
 
   const [step, setStep]           = useState(1)
   const [campaign, setCampaign]   = useState({
@@ -36,20 +37,40 @@ function NewCampaign() {
       window.api.contacts.getLists().then(setContactLists),
       window.api.templates.getAll().then(setTemplates),
       window.api.servers.getAll().then(setServers),
-    ]).then(() => {
-      // Check if we're editing/resending an existing campaign
-      if (window._resendCampaign) {
-        const r = window._resendCampaign
+    ]).then(([lists]) => {
+      const r = resendCampaign
+      if (r) {
+        const parseJson = (val, fallback) => {
+          if (Array.isArray(val)) return val
+          try { return JSON.parse(val || '[]') } catch { return fallback }
+        }
+        const serverIds      = parseJson(r.server_ids, [])
+        const customSmtpList = parseJson(r.custom_smtp_list, [])
+
         setCampaign(c => ({
           ...c,
-          name:            r.name ? r.name + ' (Copy)' : '',
-          contact_list_id: r.contact_list_id || '',
-          template_id:     r.template_id     || '',
-          server_ids:      (() => { try { return JSON.parse(r.server_ids || '[]') } catch { return [] } })(),
-          sending_mode:    r.sending_mode || 'existing_server',
+          contact_list_id:  r.contact_list_id  || '',
+          template_id:      r.template_id       || '',
+          server_ids:       serverIds,
+          sending_mode:     r.sending_mode      || 'existing_server',
+          custom_smtp_list: customSmtpList,
+          aws_access_key:   r.aws_access_key    || '',
+          aws_secret_key:   r.aws_secret_key    || '',
+          aws_region:       r.aws_region        || 'us-east-1',
+          aws_sender_email: r.aws_sender_email  || '',
         }))
-        window._resendCampaign = null
-        console.log('[Mailflow] Campaign data pre-filled')
+
+        // Pre-load contact list info for step 1 preview
+        if (r.contact_list_id) {
+          const list = (lists || []).find(l => l.id === r.contact_list_id)
+          if (list) setSelectedListInfo(list)
+          window.api.contacts.getPreview(r.contact_list_id, 200)
+            .then(rows => setPreview(rows || []))
+            .catch(() => { /* ignore */ })
+        }
+
+        clearResendCampaign()
+        console.log('[Mailflow] Campaign data pre-filled from resend')
       }
     })
 

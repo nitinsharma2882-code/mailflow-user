@@ -48,4 +48,9 @@ export const useAppStore = create((set, get) => ({
   setCampaignProgress: (id, data) => set(s => ({
     campaignProgress: { ...s.campaignProgress, [id]: data }
   })),
+
+  // Resend / duplicate campaign prefill
+  resendCampaign: null,
+  setResendCampaign: (data) => set({ resendCampaign: data }),
+  clearResendCampaign: () => set({ resendCampaign: null }),
 }))
