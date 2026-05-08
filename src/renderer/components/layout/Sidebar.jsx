@@ -8,7 +8,8 @@ const NAV = [
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: IconGrid },
       { id: 'campaigns', label: 'Campaigns', icon: IconList, badge: null },
-      { id: 'new-campaign', label: 'New campaign', icon: IconPlus },
+      { id: 'new-campaign',  label: 'New campaign',  icon: IconPlus },
+      { id: 'test-campaign', label: 'Test Campaign', icon: IconCheck },
     ]
   },
   {

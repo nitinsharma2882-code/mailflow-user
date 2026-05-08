@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, Suspense } from 'react'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
 import Campaigns from './pages/Campaigns'
@@ -12,6 +12,8 @@ import SmtpTester from './pages/SmtpTester'
 import ActivationScreen from './pages/ActivationScreen'
 import Toast from './components/ui/Toast'
 import { useAppStore } from './store/useAppStore'
+
+const TestCampaign = React.lazy(() => import('./pages/TestCampaign'))
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -56,15 +58,16 @@ class ErrorBoundary extends React.Component {
 }
 
 const PAGES = {
-  dashboard:      Dashboard,
-  campaigns:      Campaigns,
-  'new-campaign': NewCampaign,
-  contacts:       Contacts,
-  servers:        Servers,
-  templates:      Templates,
-  analytics:      Analytics,
-  verify:         VerifyEmails,
-  smtp:           SmtpTester,
+  dashboard:       Dashboard,
+  campaigns:       Campaigns,
+  'new-campaign':  NewCampaign,
+  contacts:        Contacts,
+  servers:         Servers,
+  templates:       Templates,
+  analytics:       Analytics,
+  verify:          VerifyEmails,
+  smtp:            SmtpTester,
+  'test-campaign': TestCampaign,
 }
 
 export default function App() {
@@ -198,7 +201,9 @@ export default function App() {
           </div>
         )}
         <ErrorBoundary key={activePage}>
-          <PageComponent />
+          <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--txt3)', fontSize: 13 }}>Loading...</div>}>
+            <PageComponent />
+          </Suspense>
         </ErrorBoundary>
       </Layout>
       <Toast />

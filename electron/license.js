@@ -222,6 +222,7 @@ async function checkLicense() {
     })
 
     if (result.success) {
+      global._mailflowLicenseKey = local.key
       saveLicense(Object.assign({}, local, result.license, { lastVerified: new Date().toISOString() }))
       startSessionCheck()
       return { valid: true, license: result.license }
@@ -265,8 +266,10 @@ async function activateLicense(licenseKey) {
     })
 
     if (result.success) {
+      const cleanKey = licenseKey.trim().toUpperCase()
+      global._mailflowLicenseKey = cleanKey
       saveLicense(Object.assign({
-        key: licenseKey.trim().toUpperCase(),
+        key: cleanKey,
         hardwareId: hardwareId,
         lastVerified: new Date().toISOString()
       }, result.license))
@@ -280,6 +283,10 @@ async function activateLicense(licenseKey) {
 }
 
 function registerLicenseHandlers() {
+  // Pre-load key into global for use in other IPC handlers
+  const _existing = loadLicense()
+  if (_existing && _existing.key) global._mailflowLicenseKey = _existing.key
+
   ipcMain.handle('license:check',         function() { return checkLicense() })
   ipcMain.handle('license:activate',      function(_, key) { return activateLicense(key) })
   ipcMain.handle('license:clear',         function() { clearLicense(); stopSessionCheck(); return { success: true } })
@@ -294,6 +301,32 @@ function registerLicenseHandlers() {
       return { success: false, error: e.message }
     }
   })
+  ipcMain.handle('license:getTestAccounts', async function() {
+    try {
+      const LICENSE_SERVER_URL = 'https://mailflow-license-server-production.up.railway.app'
+      const response = await fetch(LICENSE_SERVER_URL + '/api/user/test-accounts', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ licenseKey: global._mailflowLicenseKey || '' }),
+      })
+      if (!response.ok) return { success: false, accounts: [] }
+      return await response.json()
+    } catch (err) {
+      return { success: false, accounts: [], error: err.message }
+    }
+  })
+
+  ipcMain.handle('license:getTestResults', async function(_, sessionId) {
+    try {
+      const LICENSE_SERVER_URL = 'https://mailflow-license-server-production.up.railway.app'
+      const response = await fetch(LICENSE_SERVER_URL + '/api/user/test-results/' + sessionId)
+      if (!response.ok) return { success: false, results: [] }
+      return await response.json()
+    } catch (err) {
+      return { success: false, results: [], error: err.message }
+    }
+  })
+
   ipcMain.handle('license:getInstance', async function() {
     const local = loadLicense()
     if (!local || !local.key) return { success: false, error: 'No license' }

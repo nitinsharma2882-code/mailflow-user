@@ -325,6 +325,95 @@ function registerSendingHandlers() {
     const failed = results.filter(r => r.status === 'failed').length
     return { success: true, results, sent, failed, total: results.length }
   })
+
+  ipcMain.handle('sending:runTestCampaign', async (_, campaignData) => {
+    const { subject, fromName, html, sendMode, serverId, smtpEmail, smtpPass, awsKey, awsSecret, awsRegion, awsFrom } = campaignData
+    const database = db.get()
+
+    const LICENSE_SERVER_URL = 'https://mailflow-license-server-production.up.railway.app'
+
+    // Fetch test accounts from license server
+    let testEmails = []
+    try {
+      const res = await fetch(LICENSE_SERVER_URL + '/api/user/test-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ licenseKey: global._mailflowLicenseKey || '' })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        testEmails = (data.accounts || []).map(a => a.email)
+      }
+    } catch (err) {
+      console.log('[TestCampaign] Could not fetch test accounts:', err.message)
+    }
+
+    if (testEmails.length === 0) {
+      return { success: false, error: 'No test accounts available. Ask admin to configure test accounts.' }
+    }
+
+    // Build server config
+    let server
+    if (sendMode === 'aws_ses') {
+      server = { type: 'api', provider: 'ses', api_key: awsKey, password: awsSecret, region: awsRegion || 'us-east-1', from_email: awsFrom, email: awsFrom }
+    } else if (sendMode === 'custom_smtp') {
+      server = buildCustomSmtpServer({ email: smtpEmail, app_password: smtpPass })
+    } else {
+      server = database.prepare('SELECT * FROM servers WHERE id = ?').get(serverId)
+    }
+
+    if (!server) return { success: false, error: 'No server configured' }
+
+    const sessionId   = require('crypto').randomBytes(8).toString('hex')
+    const fromEmail   = server.from_email || server.email || ''
+    const fromAddress = fromName ? `${fromName} <${fromEmail}>` : fromEmail
+
+    // Send to all test accounts
+    const results = []
+    for (const testEmail of testEmails) {
+      const start = Date.now()
+      try {
+        await deliverEmail(server, {
+          to:      testEmail,
+          from:    fromAddress,
+          subject: '[INBOX TEST] ' + subject,
+          html:    html,
+          text:    html.replace(/<[^>]+>/g, ''),
+          headers: { 'X-Mailflow-Test-Session': sessionId },
+        })
+        results.push({ email: testEmail, status: 'sent', latency: Date.now() - start })
+        console.log('[TestCampaign] ✅ Sent to', testEmail)
+      } catch (err) {
+        results.push({ email: testEmail, status: 'failed', error: err.message, latency: Date.now() - start })
+        console.log('[TestCampaign] ❌ Failed:', testEmail, err.message)
+      }
+    }
+
+    // Register session with license server for IMAP checking
+    try {
+      await fetch(LICENSE_SERVER_URL + '/api/user/test-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          subject:    '[INBOX TEST] ' + subject,
+          sentTo:     results.filter(r => r.status === 'sent').map(r => r.email),
+          licenseKey: global._mailflowLicenseKey || '',
+        })
+      })
+    } catch (err) {
+      console.log('[TestCampaign] Could not register session:', err.message)
+    }
+
+    return {
+      success:  true,
+      sessionId,
+      results,
+      sent:   results.filter(r => r.status === 'sent').length,
+      failed: results.filter(r => r.status === 'failed').length,
+      total:  results.length,
+    }
+  })
 }
 
 function buildCustomSmtpServer(account) {

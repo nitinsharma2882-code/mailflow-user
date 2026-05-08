@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { StatCard, SectionHeader, Table, Card, GaugeRow, Badge, ProgressBar, Spinner } from '../components/ui/UI'
 import Button from '../components/ui/Button'
@@ -6,6 +6,26 @@ import styles from './Pages.module.css'
 
 export default function Dashboard() {
   const { analytics, setAnalytics, setActivePage, campaigns, setCampaigns, setLoading, isLoading, addToast } = useAppStore()
+
+  const [instanceInfo, setInstanceInfo]         = useState(null)
+  const [loadingInstance, setLoadingInstance]   = useState(false)
+
+  const handleRefreshInstance = useCallback(async () => {
+    setLoadingInstance(true)
+    try {
+      const result = await window.api.license.getInstance()
+      if (result.success && result.ip) {
+        setInstanceInfo(result)
+        addToast('✅ Server refreshed — IP: ' + result.ip, 'success')
+      } else {
+        addToast(result.error || 'No instance assigned yet. Contact admin.', 'error')
+      }
+    } catch (err) {
+      addToast('Error: ' + err.message, 'error')
+    } finally {
+      setLoadingInstance(false)
+    }
+  }, [])
 
   useEffect(() => {
     loadData()
@@ -80,6 +100,70 @@ export default function Dashboard() {
 
   return (
     <div>
+      {/* My Assigned Server card */}
+      <div style={{
+        background: 'var(--bg2)',
+        border: '1px solid var(--bdr)',
+        borderRadius: 'var(--rad-l)',
+        padding: '16px 20px',
+        marginBottom: 20,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 40, height: 40,
+            background: instanceInfo ? 'var(--gr-l)' : 'var(--bg3)',
+            border: '1px solid ' + (instanceInfo ? 'var(--gr)' : 'var(--bdr)'),
+            borderRadius: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 20
+          }}>🖥</div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>My Assigned Server</div>
+            {instanceInfo && instanceInfo.ip ? (
+              <div style={{ fontSize: 12, color: 'var(--txt2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  fontFamily: 'monospace',
+                  background: 'var(--bg3)',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  color: 'var(--pu)',
+                  fontWeight: 600
+                }}>{instanceInfo.ip}</span>
+                <span style={{
+                  background: 'var(--gr-l)',
+                  color: 'var(--gr)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: 20
+                }}>● {instanceInfo.status || 'Ready'}</span>
+                {instanceInfo.assignedAt && (
+                  <span style={{ color: 'var(--txt3)', fontSize: 11 }}>
+                    Since {new Date(instanceInfo.assignedAt).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--txt3)' }}>
+                No server assigned yet — click Refresh to check
+              </div>
+            )}
+          </div>
+        </div>
+        <Button
+          onClick={handleRefreshInstance}
+          loading={loadingInstance}
+          variant="primary"
+          size="sm"
+        >
+          🔄 Refresh Server
+        </Button>
+      </div>
+
       {/* Stats row */}
       <div className={styles.statGrid}>
         <StatCard label="Total sent" value={(t.total_sent || 0).toLocaleString()}

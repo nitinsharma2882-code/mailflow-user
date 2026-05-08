@@ -4,15 +4,16 @@ import Button from '../ui/Button'
 import styles from './Topbar.module.css'
 
 const PAGE_TITLES = {
-  dashboard:      'Dashboard',
-  campaigns:      'Campaigns',
-  'new-campaign': 'New campaign',
-  contacts:       'Contacts',
-  servers:        'Email servers',
-  templates:      'Templates',
-  analytics:      'Analytics',
-  verify:         'Email verification',
-  smtp:           'SMTP tester',
+  dashboard:       'Dashboard',
+  campaigns:       'Campaigns',
+  'new-campaign':  'New campaign',
+  contacts:        'Contacts',
+  servers:         'Email servers',
+  templates:       'Templates',
+  analytics:       'Analytics',
+  verify:          'Email verification',
+  smtp:            'SMTP tester',
+  'test-campaign': 'Test Campaign',
 }
 
 export default function Topbar({ licenseInfo }) {
@@ -53,6 +54,9 @@ export default function Topbar({ licenseInfo }) {
               stroke="currentColor" strokeWidth="1.2"/>
           </svg>
           Verify emails
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setActivePage('test-campaign')}>
+          🧪 Test
         </Button>
         <Button variant="primary" size="sm" onClick={() => setActivePage('new-campaign')}>
           + New campaign

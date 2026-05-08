@@ -70,7 +70,8 @@ contextBridge.exposeInMainWorld('api', {
     sendTest:       (data)              => ipcRenderer.invoke('sending:test', data),
     getQueueStatus: (campaignId)        => ipcRenderer.invoke('sending:queueStatus', campaignId),
     exportResults:  (campaignId, type)  => ipcRenderer.invoke('sending:exportResults', campaignId, type),
-    testCampaign:   (data)              => ipcRenderer.invoke('sending:testCampaign', data),
+    testCampaign:    (data)              => ipcRenderer.invoke('sending:testCampaign', data),
+    runTestCampaign: (data)              => ipcRenderer.invoke('sending:runTestCampaign', data),
   },
 
   // Email verification
@@ -113,7 +114,9 @@ contextBridge.exposeInMainWorld('api', {
     getInfo:        ()                          => ipcRenderer.invoke('license:getInfo'),
     getHardwareId:  ()                          => ipcRenderer.invoke('license:getHardwareId'),
     saveActivation: (key, license, hardwareId)  => ipcRenderer.invoke('license:saveActivation', key, license, hardwareId),
-    getInstance:    ()                           => ipcRenderer.invoke('license:getInstance'),
+    getInstance:      ()                           => ipcRenderer.invoke('license:getInstance'),
+    getTestAccounts:  ()                           => ipcRenderer.invoke('license:getTestAccounts'),
+    getTestResults:   (sessionId)                  => ipcRenderer.invoke('license:getTestResults', sessionId),
   },
 
   // File dialogs
