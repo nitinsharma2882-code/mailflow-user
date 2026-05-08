@@ -22,9 +22,20 @@ function Campaigns() {
   useEffect(() => {
     load()
 
-    // campaign:statusChange triggers a full reload (fired when campaign completes/cancels)
-    const onStatusChange = () => load()
+    const onStatusChange = (campaignId, status) => {
+      if (status === 'sent') {
+        const campaign = useAppStore.getState().campaigns.find(c => c.id === campaignId)
+        const name = campaign?.name || 'Campaign'
+        addToast('✅ ' + name + ' completed! ' + (campaign?.sent_count || 0) + ' emails sent successfully.', 'success', 6000)
+      }
+      load()
+    }
     window.api.on('campaign:statusChange', onStatusChange)
+
+    const onSmtpQuota = ({ email }) => {
+      addToast('⚠ SMTP quota reached for ' + email + ' — switched to next account', 'info', 4000)
+    }
+    window.api.on('sending:smtpQuota', onSmtpQuota)
 
     // Auto-refresh every 5s for running campaigns
     const interval = setInterval(() => {
@@ -36,8 +47,9 @@ function Campaigns() {
     return () => {
       clearInterval(interval)
       window.api.off('campaign:statusChange', onStatusChange)
+      window.api.off('sending:smtpQuota', onSmtpQuota)
     }
-  }, [load])
+  }, [load, addToast])
 
   const safeCampaigns = Array.isArray(campaigns) ? campaigns : []
   const filtered = useMemo(
@@ -143,7 +155,7 @@ function Campaigns() {
 
   const statusColor = {
     running:   { bg: '#E8F7EE', color: '#1D7348', dot: '#22C55E' },
-    sent:      { bg: '#EEF2FF', color: '#4A3AFF', dot: '#4A3AFF' },
+    sent:      { bg: '#E8F7EE', color: '#1D7348', dot: '#22C55E' },
     paused:    { bg: '#FEF9E7', color: '#F39C12', dot: '#F39C12' },
     cancelled: { bg: '#F5F5F5', color: '#888',    dot: '#888'    },
     draft:     { bg: '#F5F5F5', color: '#888',    dot: '#CCC'    },
@@ -212,7 +224,7 @@ function Campaigns() {
                 fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
                 background: sc.bg, color: sc.color, flexShrink: 0, textTransform: 'uppercase'
               }}>
-                {c.status}
+                {c.status === 'sent' ? '✅ Completed' : c.status}
               </span>
             </div>
 

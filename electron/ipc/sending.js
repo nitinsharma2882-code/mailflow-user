@@ -89,14 +89,10 @@ class SmtpRotationManager {
   getNext() {
     const active = this.pool.filter(s => s.status === 'active')
     if (active.length === 0) return null
-    let attempts = 0
-    while (attempts < active.length) {
-      const entry = active[this.index % active.length]
-      this.index++
-      attempts++
-      if (this._isWithinLimit(entry)) return entry
-    }
-    return null
+    if (this.index >= active.length) this.index = 0
+    const entry = active[this.index % active.length]
+    this.index = (this.index + 1) % active.length
+    return entry
   }
 
   nextAvailableIn() {
@@ -122,18 +118,21 @@ class SmtpRotationManager {
     }
   }
 
-  markFailure(id, error, isQuota = false) {
+  markFailure(id, error, isQuota) {
     const e = this.pool.find(s => s.id === id)
     if (!e) return
+    e.lastError = error
     if (isQuota) {
       e.status = 'quota_exceeded'
-      console.log(`[SMTP] ${id} quota exceeded — removed from pool`)
+      console.log('[SMTP Pool] ' + id + ' quota exceeded — REMOVED from pool')
+      this.index = 0
       return
     }
-    e.errorCount++
-    if (e.errorCount >= 5) {
+    e.errorCount = (e.errorCount || 0) + 1
+    if (e.errorCount >= 3) {
       e.status = 'failed'
-      console.log(`[SMTP] ${id} failed after 5 errors — removed from pool`)
+      console.log('[SMTP Pool] ' + id + ' failed 3 times — REMOVED from pool')
+      this.index = 0
     }
   }
 
@@ -569,7 +568,8 @@ async function processBatch(campaignId) {
 
           if (isQuota) {
             state.rotation.markFailure(smtpEntry.id, errMsg, true)
-            database.prepare(`UPDATE email_jobs SET status='pending', server_id=NULL WHERE id=?`).run(job.id)
+            database.prepare(`UPDATE email_jobs SET status='pending', server_id=NULL, attempts=0 WHERE id=?`).run(job.id)
+            console.log('[Send] Requeued ' + job.email + ' — quota exceeded on ' + smtpEntry.id)
             BrowserWindow.getAllWindows().forEach(w => {
               try { w.webContents.send('sending:smtpQuota', { email: smtpEntry.id, campaignId }) } catch {}
             })
