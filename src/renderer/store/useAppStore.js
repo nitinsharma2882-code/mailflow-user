@@ -53,4 +53,10 @@ export const useAppStore = create((set, get) => ({
   resendCampaign: null,
   setResendCampaign: (data) => set({ resendCampaign: data }),
   clearResendCampaign: () => set({ resendCampaign: null }),
+
+  // Test campaign history (kept in memory for session, max 10)
+  testCampaignHistory: [],
+  addTestCampaignToHistory: (entry) => set(s => ({
+    testCampaignHistory: [entry, ...s.testCampaignHistory].slice(0, 10)
+  })),
 }))

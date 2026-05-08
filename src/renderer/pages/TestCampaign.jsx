@@ -92,7 +92,7 @@ function ProviderCard({ provider, results }) {
 }
 
 export default function TestCampaign() {
-  const { servers, addToast } = useAppStore()
+  const { servers, addToast, addTestCampaignToHistory, testCampaignHistory } = useAppStore()
   const [step, setStep]           = useState('setup')
   const [form, setForm]           = useState({
     subject: '', fromName: '', html: '<p>Hi,</p><p>This is a test email.</p>',
@@ -106,6 +106,8 @@ export default function TestCampaign() {
   const [checking, setChecking]         = useState(false)
   const [pollCount, setPollCount]       = useState(0)
   const [waitSeconds, setWaitSeconds]   = useState(0)
+  const [csvAccounts, setCsvAccounts]   = useState([])
+  const [csvFilePath, setCsvFilePath]   = useState('')
 
   const IS = {
     width: '100%', padding: '8px 11px',
@@ -141,9 +143,30 @@ export default function TestCampaign() {
     }
   }
 
+  async function handlePickSmtpCsv() {
+    try {
+      const filePath = await window.api.dialog.openFile({ filters: [{ name: 'CSV', extensions: ['csv'] }] })
+      if (!filePath) return
+      const parsed = await window.api.smtp.parseCsv(filePath)
+      if (!parsed || !parsed.accounts || parsed.accounts.length === 0) {
+        addToast('No valid SMTP accounts found in CSV', 'error')
+        return
+      }
+      setCsvAccounts(parsed.accounts)
+      setCsvFilePath(filePath)
+      addToast('Loaded ' + parsed.accounts.length + ' SMTP accounts from CSV', 'success')
+    } catch (err) {
+      addToast('Failed to load CSV: ' + err.message, 'error')
+    }
+  }
+
   async function handleStartTest() {
     if (!form.subject) { addToast('Enter a subject line', 'error'); return }
     if (!form.html)    { addToast('Enter email HTML body', 'error'); return }
+    if (form.sendMode === 'csv_smtp' && csvAccounts.length === 0) {
+      addToast('Upload a CSV file with SMTP accounts', 'error')
+      return
+    }
     if (testAccounts.length === 0) {
       addToast('No test accounts configured. Ask admin to add test accounts.', 'error')
       return
@@ -154,17 +177,18 @@ export default function TestCampaign() {
 
     try {
       const result = await window.api.sending.runTestCampaign({
-        subject:   form.subject,
-        fromName:  form.fromName,
-        html:      form.html,
-        sendMode:  form.sendMode,
-        serverId:  form.serverId,
-        smtpEmail: form.smtpEmail,
-        smtpPass:  form.smtpPass,
-        awsKey:    form.awsKey,
-        awsSecret: form.awsSecret,
-        awsRegion: form.awsRegion,
-        awsFrom:   form.awsFrom,
+        subject:     form.subject,
+        fromName:    form.fromName,
+        html:        form.html,
+        sendMode:    form.sendMode,
+        serverId:    form.serverId,
+        smtpEmail:   form.smtpEmail,
+        smtpPass:    form.smtpPass,
+        awsKey:      form.awsKey,
+        awsSecret:   form.awsSecret,
+        awsRegion:   form.awsRegion,
+        awsFrom:     form.awsFrom,
+        csvAccounts: csvAccounts,
       })
 
       if (!result.success) {
@@ -181,6 +205,23 @@ export default function TestCampaign() {
 
       setSending(false)
       setStep('results')
+      addTestCampaignToHistory({
+        id:          result.sessionId || Date.now().toString(),
+        subject:     form.subject,
+        fromName:    form.fromName,
+        html:        form.html,
+        sendMode:    form.sendMode,
+        serverId:    form.serverId,
+        smtpEmail:   form.smtpEmail,
+        smtpPass:    form.smtpPass,
+        awsKey:      form.awsKey,
+        awsSecret:   form.awsSecret,
+        awsRegion:   form.awsRegion,
+        awsFrom:     form.awsFrom,
+        csvAccounts: csvAccounts,
+        testedAt:    new Date().toISOString(),
+        overallPct:  0,
+      })
 
       let countdown = 60
       setWaitSeconds(countdown)
@@ -240,6 +281,8 @@ export default function TestCampaign() {
     setWaitSeconds(0)
     setChecking(false)
     setPollCount(0)
+    setCsvAccounts([])
+    setCsvFilePath('')
   }
 
   const groupedResults = results.reduce((acc, r) => {
@@ -312,6 +355,7 @@ export default function TestCampaign() {
                   ['server',      '🖥 Saved Server'],
                   ['custom_smtp', '📧 Gmail App Password'],
                   ['aws_ses',     '☁️ AWS SES'],
+                  ['csv_smtp',    '📋 Upload SMTP CSV'],
                 ].map(([val, label]) => (
                   <div key={val} onClick={() => setForm(f => ({ ...f, sendMode: val }))} style={{
                     padding: '10px 12px',
@@ -373,6 +417,49 @@ export default function TestCampaign() {
                   </div>
                 </div>
               )}
+
+              {form.sendMode === 'csv_smtp' && (
+                <div>
+                  <div
+                    onClick={handlePickSmtpCsv}
+                    style={{
+                      border: '2px dashed var(--bdr2)', borderRadius: 'var(--rad)',
+                      padding: '20px 12px', textAlign: 'center', cursor: 'pointer',
+                      background: csvAccounts.length > 0 ? 'var(--gr-l)' : 'var(--bg)',
+                      marginBottom: csvAccounts.length > 0 ? 10 : 0,
+                    }}
+                  >
+                    {csvAccounts.length > 0 ? (
+                      <>
+                        <div style={{ fontSize: 20, marginBottom: 4 }}>✅</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--gr)' }}>
+                          {csvAccounts.length} account{csvAccounts.length !== 1 ? 's' : ''} loaded
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--txt3)', marginTop: 2, wordBreak: 'break-all' }}>
+                          {csvFilePath.split(/[\\/]/).pop()}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--txt3)', marginTop: 4 }}>Click to replace</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 24, marginBottom: 4 }}>📂</div>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>Click to upload SMTP CSV</div>
+                        <div style={{ fontSize: 11, color: 'var(--txt3)', marginTop: 2 }}>email, password, host, port columns</div>
+                      </>
+                    )}
+                  </div>
+                  {csvAccounts.length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--txt3)' }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--txt2)' }}>Preview (first {Math.min(5, csvAccounts.length)}):</div>
+                      {csvAccounts.slice(0, 5).map((a, i) => (
+                        <div key={i} style={{ fontFamily: 'monospace', padding: '2px 0' }}>
+                          {a.email}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', padding: 16 }}>
@@ -393,6 +480,50 @@ export default function TestCampaign() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {step === 'setup' && testCampaignHistory.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12, color: 'var(--txt2)' }}>🕒 Previous Tests</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {testCampaignHistory.map((h) => (
+              <div key={h.id} style={{
+                background: 'var(--bg2)', border: '1px solid var(--bdr)',
+                borderRadius: 'var(--rad)', padding: '12px 16px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{h.subject}</div>
+                  <div style={{ fontSize: 11, color: 'var(--txt3)' }}>
+                    {h.fromName && <span>{h.fromName} · </span>}
+                    {h.sendMode} · {new Date(h.testedAt).toLocaleString()}
+                  </div>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => {
+                  setForm(f => ({
+                    ...f,
+                    subject:   h.subject,
+                    fromName:  h.fromName,
+                    html:      h.html,
+                    sendMode:  h.sendMode,
+                    serverId:  h.serverId || f.serverId,
+                    smtpEmail: h.smtpEmail || '',
+                    smtpPass:  h.smtpPass  || '',
+                    awsKey:    h.awsKey    || '',
+                    awsSecret: h.awsSecret || '',
+                    awsRegion: h.awsRegion || 'us-east-1',
+                    awsFrom:   h.awsFrom   || '',
+                  }))
+                  if (h.csvAccounts && h.csvAccounts.length > 0) {
+                    setCsvAccounts(h.csvAccounts)
+                    setCsvFilePath('(from history)')
+                  }
+                  addToast('Form prefilled from previous test', 'info')
+                }}>↩ Re-run</Button>
+              </div>
+            ))}
           </div>
         </div>
       )}

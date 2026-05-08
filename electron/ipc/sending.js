@@ -327,7 +327,7 @@ function registerSendingHandlers() {
   })
 
   ipcMain.handle('sending:runTestCampaign', async (_, campaignData) => {
-    const { subject, fromName, html, sendMode, serverId, smtpEmail, smtpPass, awsKey, awsSecret, awsRegion, awsFrom } = campaignData
+    const { subject, fromName, html, sendMode, serverId, smtpEmail, smtpPass, awsKey, awsSecret, awsRegion, awsFrom, csvAccounts } = campaignData
     const database = db.get()
 
     const LICENSE_SERVER_URL = 'https://mailflow-license-server-production.up.railway.app'
@@ -358,6 +358,9 @@ function registerSendingHandlers() {
       server = { type: 'api', provider: 'ses', api_key: awsKey, password: awsSecret, region: awsRegion || 'us-east-1', from_email: awsFrom, email: awsFrom }
     } else if (sendMode === 'custom_smtp') {
       server = buildCustomSmtpServer({ email: smtpEmail, app_password: smtpPass })
+    } else if (sendMode === 'csv_smtp') {
+      if (!csvAccounts || csvAccounts.length === 0) return { success: false, error: 'No SMTP accounts in CSV' }
+      server = buildCustomSmtpServer(csvAccounts[0])
     } else {
       server = database.prepare('SELECT * FROM servers WHERE id = ?').get(serverId)
     }
