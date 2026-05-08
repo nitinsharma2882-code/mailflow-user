@@ -24,6 +24,8 @@ function NewCampaign() {
   const [launching, setLaunching]           = useState(false)
   const [testEmails, setTestEmails]         = useState('')
   const [quotaWarnings, setQuotaWarnings]   = useState([])
+  const [testingCampaign, setTestingCampaign] = useState(false)
+  const [testResults, setTestResults]         = useState(null)
 
   // Custom SMTP state
   const [smtpCsvAccounts, setSmtpCsvAccounts] = useState([])
@@ -64,9 +66,12 @@ function NewCampaign() {
         if (r.contact_list_id) {
           const list = (lists || []).find(l => l.id === r.contact_list_id)
           if (list) setSelectedListInfo(list)
-          window.api.contacts.getPreview(r.contact_list_id, 200)
+          window.api.contacts.getPreviewFull(r.contact_list_id, 200)
             .then(rows => setPreview(rows || []))
-            .catch(() => { /* ignore */ })
+            .catch(() => window.api.contacts.getPreview(r.contact_list_id, 200)
+              .then(rows => setPreview(rows || []))
+              .catch(() => { /* ignore */ })
+            )
         }
 
         clearResendCampaign()
@@ -118,8 +123,13 @@ function NewCampaign() {
     if (!listId) { setSelectedListInfo(null); setPreview([]); return }
     const list = contactLists.find(l => l.id === listId)
     setSelectedListInfo(list)
-    const rows = await window.api.contacts.getPreview(listId, 200)
-    setPreview(rows)
+    try {
+      const rows = await window.api.contacts.getPreviewFull(listId, 200)
+      setPreview(rows || [])
+    } catch {
+      const rows = await window.api.contacts.getPreview(listId, 200)
+      setPreview(rows || [])
+    }
   }
 
   async function handleDownloadInvalid() {
@@ -247,6 +257,48 @@ function NewCampaign() {
     const result = await window.api.sending.sendTest({ campaignId: draft.id, testEmails: emails, serverId, customSmtpAccount })
     if (result.success) addToast(`Test sent to ${emails.length} address(es)`, 'success')
     else addToast('Test failed: ' + result.error, 'error')
+  }
+
+  // ── Test campaign (send to fixed test addresses) ──
+  async function handleTestCampaign() {
+    setTestingCampaign(true)
+    setTestResults(null)
+    try {
+      let html = '', subject = '', fromName = ''
+      const tmpl = templates.find(t => t.id === campaign.template_id)
+      if (tmpl) {
+        const full = await window.api.templates.getById(tmpl.id)
+        html     = full.html_body  || ''
+        subject  = full.subject    || ''
+        fromName = full.from_name  || ''
+      }
+
+      let serverConfig = null, customSmtpAccount = null, awsConfig = null
+      if (campaign.sending_mode === 'aws_ses') {
+        awsConfig = {
+          accessKeyId:     campaign.aws_access_key    || '',
+          secretAccessKey: campaign.aws_secret_key    || '',
+          region:          campaign.aws_region        || 'us-east-1',
+          fromEmail:       campaign.aws_sender_email  || '',
+        }
+      } else if (campaign.sending_mode === 'custom_smtp' && campaign.custom_smtp_list?.length > 0) {
+        customSmtpAccount = campaign.custom_smtp_list[0]
+      } else {
+        const srvId = campaign.server_ids[0]
+        if (srvId) serverConfig = servers.find(s => s.id === srvId) || null
+      }
+
+      const result = await window.api.sending.testCampaign({
+        html, subject, fromName,
+        fromEmail:         serverConfig?.from_email || serverConfig?.email || '',
+        serverConfig, customSmtpAccount, awsConfig,
+      })
+      setTestResults(result)
+    } catch (err) {
+      setTestResults({ success: false, error: err.message })
+    } finally {
+      setTestingCampaign(false)
+    }
   }
 
   // ── Launch ──
@@ -444,7 +496,7 @@ function NewCampaign() {
                         <td style={{ padding: '7px 14px', fontFamily: 'monospace', fontSize: 11 }}>{c.email || ''}</td>
                         <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{c.name || '—'}</td>
                         <td style={{ padding: '7px 14px', color: 'var(--txt2)' }}>{c.address || '—'}</td>
-                        <td style={{ padding: '7px 14px', color: 'var(--txt3)', fontStyle: 'italic', fontSize: 11 }}>auto-generated</td>
+                        <td style={{ padding: '7px 14px', color: 'var(--txt3)', fontFamily: 'monospace', fontSize: 11 }}>{c.unique_id || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -776,11 +828,33 @@ function NewCampaign() {
               text={campaign.sending_mode === 'custom_smtp' ? `${campaign.custom_smtp_list?.length || 0} SMTP accounts (round-robin)` : campaign.sending_mode === 'aws_ses' ? `AWS SES · ${campaign.aws_region || 'us-east-1'} · ${campaign.aws_sender_email || 'no sender set'}` : `${campaign.server_ids.length} server(s) selected`} />
           </div>
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: testResults ? 12 : 0 }}>
+            <Button variant="ghost" loading={testingCampaign} onClick={handleTestCampaign}>🧪 Send Test Emails</Button>
             <Button variant="success" loading={launching} onClick={() => handleLaunch(false)}>🚀 Start Campaign Now</Button>
             {campaign.scheduled_at && <Button loading={launching} onClick={() => handleLaunch(true)}>📅 Schedule</Button>}
             <Button variant="ghost" onClick={saveDraft}>💾 Save Draft</Button>
           </div>
+
+          {testResults && (
+            <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', padding: '12px 14px', marginTop: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                🧪 Test Results — {testResults.sent || 0}/{testResults.total || 0} sent
+              </div>
+              {testResults.error && (
+                <div style={{ color: 'var(--re)', fontSize: 12, marginBottom: 6 }}>❌ {testResults.error}</div>
+              )}
+              {testResults.results && testResults.results.map((r, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0',
+                  borderBottom: i < testResults.results.length - 1 ? '1px solid var(--bdr)' : 'none', fontSize: 12 }}>
+                  <span style={{ fontSize: 14 }}>{r.status === 'sent' ? '✅' : '❌'}</span>
+                  <span style={{ fontFamily: 'monospace', flex: 1 }}>{r.email}</span>
+                  <span style={{ color: r.status === 'sent' ? 'var(--gr)' : 'var(--re)', fontWeight: 500 }}>
+                    {r.status === 'sent' ? `${r.latency}ms` : r.error?.substring(0, 60) || 'failed'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

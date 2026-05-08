@@ -36,7 +36,8 @@ contextBridge.exposeInMainWorld('api', {
     importCSV:     (filePath, listName)    => ipcRenderer.invoke('contacts:importCSV', filePath, listName),
     deleteList:    (id)                    => ipcRenderer.invoke('contacts:deleteList', id),
     exportInvalid: (listId)               => ipcRenderer.invoke('contacts:exportInvalid', listId),
-    getPreview:    (listId, limit)         => ipcRenderer.invoke('contacts:getPreview', listId, limit),
+    getPreview:     (listId, limit)         => ipcRenderer.invoke('contacts:getPreview', listId, limit),
+    getPreviewFull: (listId, limit)         => ipcRenderer.invoke('contacts:getPreviewFull', listId, limit),
   },
 
   // Servers
@@ -69,6 +70,7 @@ contextBridge.exposeInMainWorld('api', {
     sendTest:       (data)              => ipcRenderer.invoke('sending:test', data),
     getQueueStatus: (campaignId)        => ipcRenderer.invoke('sending:queueStatus', campaignId),
     exportResults:  (campaignId, type)  => ipcRenderer.invoke('sending:exportResults', campaignId, type),
+    testCampaign:   (data)              => ipcRenderer.invoke('sending:testCampaign', data),
   },
 
   // Email verification
@@ -111,6 +113,7 @@ contextBridge.exposeInMainWorld('api', {
     getInfo:        ()                          => ipcRenderer.invoke('license:getInfo'),
     getHardwareId:  ()                          => ipcRenderer.invoke('license:getHardwareId'),
     saveActivation: (key, license, hardwareId)  => ipcRenderer.invoke('license:saveActivation', key, license, hardwareId),
+    getInstance:    ()                           => ipcRenderer.invoke('license:getInstance'),
   },
 
   // File dialogs

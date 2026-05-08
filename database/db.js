@@ -176,6 +176,29 @@ function addMissingColumns() {
       console.log(`[DB] Column migration note (${m.table}.${m.column}):`, err.message)
     }
   }
+
+  // unique_id column for contacts
+  try {
+    const contactsCols = db.pragma('table_info(contacts)').map(c => c.name)
+    if (!contactsCols.includes('unique_id')) {
+      db.exec("ALTER TABLE contacts ADD COLUMN unique_id TEXT DEFAULT ''")
+      console.log('[DB] Added contacts.unique_id column')
+      const contactsWithoutId = db.prepare("SELECT id FROM contacts WHERE unique_id IS NULL OR unique_id = ''").all()
+      const updateStmt = db.prepare("UPDATE contacts SET unique_id = ? WHERE id = ?")
+      const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+      const numbers = '0123456789'
+      contactsWithoutId.forEach(c => {
+        let uid = ''
+        for (let i = 0; i < 6; i++) uid += letters[Math.floor(Math.random() * letters.length)]
+        for (let i = 0; i < 2; i++) uid += numbers[Math.floor(Math.random() * numbers.length)]
+        uid = uid.split('').sort(() => Math.random() - 0.5).join('')
+        updateStmt.run(uid, c.id)
+      })
+      console.log('[DB] Backfilled unique_id for', contactsWithoutId.length, 'contacts')
+    }
+  } catch (err) {
+    console.log('[DB] unique_id migration note:', err.message)
+  }
 }
 
 function fixEmailJobsSchema() {

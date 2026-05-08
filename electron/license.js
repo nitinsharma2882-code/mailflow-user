@@ -286,6 +286,27 @@ function registerLicenseHandlers() {
   ipcMain.handle('license:getInfo',       function() { return loadLicense() })
   ipcMain.handle('license:getHardwareId', function() { return getHardwareId() })
   ipcMain.handle('license:validateNow',   function() { return validateSession() })
+  ipcMain.handle('license:saveActivation', function(_, key, license, hardwareId) {
+    try {
+      saveLicense(Object.assign({ key, hardwareId }, license, { lastVerified: new Date().toISOString() }))
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+  ipcMain.handle('license:getInstance', async function() {
+    const local = loadLicense()
+    if (!local || !local.key) return { success: false, error: 'No license' }
+    try {
+      const result = await httpPost('/api/user/instance', {
+        licenseKey: local.key,
+        hardwareId: getHardwareId()
+      })
+      return result
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }

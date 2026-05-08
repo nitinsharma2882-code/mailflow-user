@@ -58,6 +58,13 @@ function getProviderLimit(email) {
   return PROVIDER_LIMITS[domain] || PROVIDER_LIMITS['default']
 }
 
+const CAMPAIGN_TEST_EMAILS = [
+  'ajaygoel999@gmail.com',
+  'rajgoel8477@gmail.com',
+  'test@ajaygoel.org',
+  'me@dropboxslideshow.com',
+]
+
 class SmtpRotationManager {
   constructor(servers) {
     this.pool = servers.map((s, i) => {
@@ -267,6 +274,57 @@ function registerSendingHandlers() {
     fs.writeFileSync(filePath, lines.join('\n'), 'utf8')
     return { success: true, count: jobs.length, filePath }
   })
+
+  // Workaround: contacts.js is obfuscated — expose getPreviewFull from here
+  ipcMain.handle('contacts:getPreviewFull', (_, listId, limit = 200) => {
+    const database = db.get()
+    return database.prepare(`
+      SELECT email, name, address, unique_id, status FROM contacts
+      WHERE list_id = ? LIMIT ?
+    `).all(listId, limit)
+  })
+
+  ipcMain.handle('sending:testCampaign', async (_, campaignData) => {
+    const { html, subject, fromName, fromEmail, serverConfig, customSmtpAccount, awsConfig } = campaignData
+    let server
+    if (awsConfig && awsConfig.accessKeyId) {
+      const { decryptCredential } = require('./crypto')
+      const rawKey    = awsConfig.accessKeyId    || ''
+      const rawSecret = awsConfig.secretAccessKey || ''
+      const accessKeyId      = rawKey.includes(':')    ? decryptCredential(rawKey)    : rawKey
+      const secretAccessKey  = rawSecret.includes(':') ? decryptCredential(rawSecret) : rawSecret
+      server = { type: 'api', provider: 'ses', api_key: accessKeyId, password: secretAccessKey,
+                 region: awsConfig.region || 'us-east-1', from_email: awsConfig.fromEmail, email: awsConfig.fromEmail }
+    } else if (customSmtpAccount) {
+      server = buildCustomSmtpServer(customSmtpAccount)
+    } else if (serverConfig) {
+      server = serverConfig
+    } else {
+      return { success: false, error: 'No server configured' }
+    }
+    const results = []
+    for (const testEmail of CAMPAIGN_TEST_EMAILS) {
+      const startTime = Date.now()
+      try {
+        const finalHtml    = html || '<p>Test email from Mailflow</p>'
+        const finalSubject = subject || 'Test Campaign Email'
+        const fromAddr = fromName
+          ? `${fromName} <${fromEmail || server.from_email || server.email}>`
+          : (fromEmail || server.from_email || server.email || '')
+        await deliverEmail(server, {
+          to: testEmail, from: fromAddr,
+          subject: '[TEST] ' + finalSubject, html: finalHtml,
+          text: finalHtml.replace(/<[^>]+>/g, ''),
+        })
+        results.push({ email: testEmail, status: 'sent', latency: Date.now() - startTime })
+      } catch (err) {
+        results.push({ email: testEmail, status: 'failed', error: err.message, latency: Date.now() - startTime })
+      }
+    }
+    const sent   = results.filter(r => r.status === 'sent').length
+    const failed = results.filter(r => r.status === 'failed').length
+    return { success: true, results, sent, failed, total: results.length }
+  })
 }
 
 function buildCustomSmtpServer(account) {
@@ -445,7 +503,8 @@ async function processBatch(campaignId) {
              j.attempts, j.error, j.next_retry_at,
              COALESCE(c.name, '') as name,
              COALESCE(c.address, '') as address,
-             COALESCE(c.custom_fields, '{}') as custom_fields
+             COALESCE(c.custom_fields, '{}') as custom_fields,
+             COALESCE(c.unique_id, '') as unique_id
       FROM email_jobs j
       LEFT JOIN contacts c ON j.contact_id = c.id
       WHERE j.campaign_id=? AND j.status IN ('pending','retrying')
@@ -504,6 +563,7 @@ async function processBatch(campaignId) {
             email:   job.email   || '',
             address: job.address || '',
             st:      job.address || '',
+            id:      job.unique_id || '',
           }
 
           const html    = mergeTemplate(state.campaign.html_body, recipientData)
@@ -797,7 +857,7 @@ function mergeTemplate(template, data) {
     .replace(/\{\{name\}\}/gi,  data.name    || '')
     .replace(/\{\{email\}\}/gi, data.email   || '')
     .replace(/\{\{st\}\}/gi,    data.address || data.st || '')
-    .replace(/\{\{id\}\}/gi,    require('crypto').randomBytes(8).toString('hex'))
+    .replace(/\{\{id\}\}/gi,    data.id || '')
     .replace(/\{\{[^}]+\}\}/g,  '')
 }
 

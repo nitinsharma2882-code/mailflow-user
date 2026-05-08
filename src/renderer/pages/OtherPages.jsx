@@ -99,13 +99,15 @@ const SES_REGIONS = [
 
 export function Servers() {
   const { servers, setServers, addToast } = useAppStore()
-  const [showAdd, setShowAdd]     = useState(false)
-  const [srvMode, setSrvMode]     = useState('smtp')
-  const [provider, setProvider]   = useState('ses')
-  const [testing, setTesting]     = useState(null)
-  const [testingNew, setTestingNew] = useState(false)
-  const [testResult, setTestResult] = useState(null)
-  const [saving, setSaving]       = useState(false)
+  const [showAdd, setShowAdd]         = useState(false)
+  const [srvMode, setSrvMode]         = useState('smtp')
+  const [provider, setProvider]       = useState('ses')
+  const [testing, setTesting]         = useState(null)
+  const [testingNew, setTestingNew]   = useState(false)
+  const [testResult, setTestResult]   = useState(null)
+  const [saving, setSaving]           = useState(false)
+  const [instanceInfo, setInstanceInfo]   = useState(null)
+  const [loadingInstance, setLoadingInstance] = useState(false)
   const [form, setForm] = useState({
     name: '', host: '', port: 587, email: '', password: '',
     encryption: 'tls', api_key: '', secret_key: '', region: 'us-east-1',
@@ -113,6 +115,18 @@ export function Servers() {
   })
 
   useEffect(() => { window.api.servers.getAll().then(setServers) }, [])
+
+  async function handleRefreshInstance() {
+    setLoadingInstance(true)
+    try {
+      const result = await window.api.license.getInstance()
+      setInstanceInfo(result)
+    } catch (err) {
+      setInstanceInfo({ success: false, error: err.message })
+    } finally {
+      setLoadingInstance(false)
+    }
+  }
 
   const IS = {
     width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
@@ -219,10 +233,30 @@ export function Servers() {
   return (
     <div>
       <SectionHeader title="Email Servers">
+        <Button size="sm" variant="ghost" loading={loadingInstance} onClick={handleRefreshInstance}>🔄 Server Info</Button>
         <Button variant="primary" onClick={() => { setShowAdd(v => !v); setTestResult(null) }}>
           {showAdd ? '✕ Cancel' : '+ Add Server'}
         </Button>
       </SectionHeader>
+
+      {instanceInfo && (
+        <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)',
+          padding: '12px 16px', marginBottom: 14, fontSize: 12 }}>
+          {instanceInfo.success === false ? (
+            <span style={{ color: 'var(--re)' }}>❌ {instanceInfo.error || 'Could not fetch instance info'}</span>
+          ) : (
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+              {instanceInfo.ip      && <span>🌐 <strong>IP:</strong> {instanceInfo.ip}</span>}
+              {instanceInfo.region  && <span>📍 <strong>Region:</strong> {instanceInfo.region}</span>}
+              {instanceInfo.plan    && <span>📋 <strong>Plan:</strong> {instanceInfo.plan}</span>}
+              {instanceInfo.status  && <span>🟢 <strong>Status:</strong> {instanceInfo.status}</span>}
+              {!instanceInfo.ip && !instanceInfo.region && (
+                <span style={{ color: 'var(--txt3)' }}>{JSON.stringify(instanceInfo)}</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {servers.map(s => {
         const usedPct = s.daily_limit > 0 ? Math.round((s.sent_today / s.daily_limit) * 100) : 0
@@ -1049,30 +1083,39 @@ export function SmtpTester() {
       {/* Results Table */}
       {results.length > 0 && (
         <div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt2)', marginRight: 4 }}>Filter:</div>
             {[
-              ['all',      'All ('      + results.length + ')'],
-              ['working',  'Working ('  + results.filter(r=>r.status==='working').length + ')'],
-              ['invalid',  'Invalid ('  + results.filter(r=>r.status==='invalid').length + ')'],
-              ['quota',    'Quota ('    + results.filter(r=>r.status==='quota').length + ')'],
-              ['disabled', 'Disabled (' + results.filter(r=>r.status==='disabled').length + ')'],
-              ['timeout',  'Timeout ('  + results.filter(r=>r.status==='timeout'||r.status==='connection').length + ')'],
-              ['failed',   'Failed ('   + results.filter(r=>r.status==='failed'||r.status==='tls').length + ')'],
-            ].map(([val, label]) => (
-              <button key={val} onClick={() => setFilterStatus(val)}
-                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                  fontFamily: 'var(--font)',
-                  background: filterStatus === val ? 'var(--pu)' : 'var(--bg2)',
-                  color: filterStatus === val ? '#fff' : 'var(--txt2)',
-                  border: filterStatus === val ? '1px solid var(--pu)' : '1px solid var(--bdr)' }}>
-                {label}
-              </button>
+              ['all',      'All',       null,        results.length],
+              ['working',  'Working',   'working',   results.filter(r=>r.status==='working').length],
+              ['invalid',  'Invalid',   'invalid',   results.filter(r=>r.status==='invalid').length],
+              ['quota',    'Quota',     'quota',     results.filter(r=>r.status==='quota').length],
+              ['disabled', 'Disabled',  'disabled',  results.filter(r=>r.status==='disabled').length],
+              ['timeout',  'Timeout',   'timeout',   results.filter(r=>r.status==='timeout'||r.status==='connection').length],
+              ['failed',   'Failed',    'failed',    results.filter(r=>r.status==='failed'||r.status==='tls').length],
+            ].map(([val, label, exportType, count]) => (
+              <div key={val} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 6, overflow: 'hidden',
+                border: filterStatus === val ? '1px solid var(--pu)' : '1px solid var(--bdr)', flexShrink: 0 }}>
+                <button onClick={() => setFilterStatus(val)}
+                  style={{ padding: '5px 10px', fontSize: 12, cursor: 'pointer',
+                    fontFamily: 'var(--font)', border: 'none', outline: 'none',
+                    background: filterStatus === val ? 'var(--pu)' : 'var(--bg2)',
+                    color: filterStatus === val ? '#fff' : 'var(--txt2)' }}>
+                  {label} ({count})
+                </button>
+                {exportType && (
+                  <button onClick={() => handleExport(exportType)}
+                    title={'Download ' + label + ' CSV'}
+                    style={{ padding: '5px 7px', fontSize: 12, cursor: 'pointer',
+                      fontFamily: 'var(--font)', border: 'none', outline: 'none',
+                      borderLeft: filterStatus === val ? '1px solid rgba(255,255,255,0.3)' : '1px solid var(--bdr)',
+                      background: filterStatus === val ? 'var(--pu)' : 'var(--bg2)',
+                      color: filterStatus === val ? 'rgba(255,255,255,0.75)' : 'var(--txt3)' }}>
+                    ↓
+                  </button>
+                )}
+              </div>
             ))}
-            <div style={{ flex: 1 }} />
-            <Button size="sm" variant="ghost" onClick={() => handleExport('working')}>↓ Working CSV</Button>
-            <Button size="sm" variant="ghost" onClick={() => handleExport('failed')}>↓ Failed CSV</Button>
-            <Button size="sm" variant="ghost" onClick={() => handleExport('all')}>↓ Full Report</Button>
           </div>
 
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad-l)', overflow: 'hidden' }}>
