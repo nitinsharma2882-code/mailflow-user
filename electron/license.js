@@ -328,15 +328,28 @@ function registerLicenseHandlers() {
   })
 
   ipcMain.handle('license:getInstance', async function() {
-    const local = loadLicense()
-    if (!local || !local.key) return { success: false, error: 'No license' }
     try {
-      const result = await httpPost('/api/user/instance', {
-        licenseKey: local.key,
-        hardwareId: getHardwareId()
+      const licenseKey = global._mailflowLicenseKey || ''
+
+      if (!licenseKey) {
+        return { success: false, error: 'No license key found. Please activate the software first.' }
+      }
+
+      console.log('[getInstance] Fetching instance for license:', licenseKey.substring(0, 10) + '...')
+
+      const res = await fetch(LICENSE_SERVER + '/api/user/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ licenseKey, hardwareId: '' })
       })
-      return result
+
+      if (!res.ok) return { success: false, error: 'Server error: ' + res.status }
+
+      const data = await res.json()
+      console.log('[getInstance] Response:', JSON.stringify(data))
+      return data
     } catch (err) {
+      console.log('[getInstance] Error:', err.message)
       return { success: false, error: err.message }
     }
   })
