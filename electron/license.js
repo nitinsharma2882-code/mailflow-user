@@ -266,6 +266,26 @@ async function checkLicense() {
       global._mailflowLicenseKey = local.key
       saveLicense(Object.assign({}, local, result.license, { lastVerified: new Date().toISOString() }))
       startSessionCheck()
+      // Auto-fetch assigned instance so campaigns route through agent without needing Dashboard click
+      ;(async () => {
+        try {
+          const inst = await httpPost('/api/user/instance', { licenseKey: local.key })
+          if (inst.success && inst.ip) {
+            global._mailflowAssignedInstance = {
+              ip:         inst.ip,
+              instanceId: inst.instanceId,
+              agentToken: inst.agentToken || 'mailflow-agent-2026',
+              agentPort:  inst.agentPort  || 3000,
+              assignedAt: inst.assignedAt,
+            }
+            console.log('[License] Auto-fetched instance on startup:', inst.ip)
+          } else {
+            console.log('[License] No instance assigned yet:', inst.error || 'none in pool')
+          }
+        } catch (err) {
+          console.log('[License] Auto-fetch instance failed (non-critical):', err.message)
+        }
+      })()
       return { valid: true, license: result.license }
     } else {
       if (result.expired) {

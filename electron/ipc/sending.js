@@ -626,8 +626,12 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
     return { success: true, totalJobs: contacts.length, smtpCount: smtpList?.length || 0, mode: 'agent', agentIp }
   } catch (err) {
     console.error('[Mailflow] Agent connection failed:', err.message)
-    console.log('[Mailflow] Falling back to local sending...')
-    return startCampaignLocal(campaignId, campaign, contacts, database)
+    db.get().prepare("UPDATE campaigns SET status='draft' WHERE id=?").run(campaignId)
+    runningCampaigns.delete(campaignId)
+    return {
+      success: false,
+      error: 'Agent server unreachable (' + agentIp + '): ' + err.message + '. Go to Dashboard → Refresh Server and try again.',
+    }
   }
 }
 
