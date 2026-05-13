@@ -4,6 +4,47 @@ const os     = require('os')
 const path   = require('path')
 const fs     = require('fs')
 const https  = require('https')
+const http   = require('http')
+
+function httpRequest(url, method, body, extraHeaders) {
+  return new Promise((resolve, reject) => {
+    const urlObj  = new URL(url)
+    const isHttps = urlObj.protocol === 'https:'
+    const mod     = isHttps ? https : http
+    const bodyStr = body ? JSON.stringify(body) : null
+    const options = {
+      hostname: urlObj.hostname,
+      port:     urlObj.port || (isHttps ? 443 : 80),
+      path:     urlObj.pathname + (urlObj.search || ''),
+      method:   method || 'GET',
+      headers:  Object.assign(
+        { 'Content-Type': 'application/json' },
+        bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {},
+        extraHeaders || {}
+      ),
+      rejectUnauthorized: false,
+    }
+    const req = mod.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try {
+          resolve({
+            ok:     res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            json:   () => JSON.parse(data),
+          })
+        } catch (e) {
+          reject(new Error('Invalid JSON response: ' + data.substring(0, 100)))
+        }
+      })
+    })
+    req.on('error',   (e) => reject(new Error('Network error: ' + e.message)))
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timeout after 15s')) })
+    if (bodyStr) req.write(bodyStr)
+    req.end()
+  })
+}
 
 // Disable TLS verification for Railway
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
@@ -303,14 +344,9 @@ function registerLicenseHandlers() {
   })
   ipcMain.handle('license:getTestAccounts', async function() {
     try {
-      const LICENSE_SERVER_URL = 'https://mailflow-license-server-production.up.railway.app'
-      const response = await fetch(LICENSE_SERVER_URL + '/api/user/test-accounts', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ licenseKey: global._mailflowLicenseKey || '' }),
-      })
-      if (!response.ok) return { success: false, accounts: [] }
-      return await response.json()
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/test-accounts', 'POST', { licenseKey: global._mailflowLicenseKey || '' })
+      if (!res.ok) return { success: false, accounts: [] }
+      return res.json()
     } catch (err) {
       return { success: false, accounts: [], error: err.message }
     }
@@ -318,10 +354,9 @@ function registerLicenseHandlers() {
 
   ipcMain.handle('license:getTestResults', async function(_, sessionId) {
     try {
-      const LICENSE_SERVER_URL = 'https://mailflow-license-server-production.up.railway.app'
-      const response = await fetch(LICENSE_SERVER_URL + '/api/user/test-results/' + sessionId)
-      if (!response.ok) return { success: false, results: [] }
-      return await response.json()
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/test-results/' + sessionId, 'GET')
+      if (!res.ok) return { success: false, results: [] }
+      return res.json()
     } catch (err) {
       return { success: false, results: [], error: err.message }
     }
@@ -334,18 +369,13 @@ function registerLicenseHandlers() {
 
       console.log('[getInstance] Fetching instance for:', licenseKey.substring(0, 10) + '...')
 
-      const res = await fetch(LICENSE_SERVER + '/api/user/instance', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ licenseKey })
-      })
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/instance', 'POST', { licenseKey })
       if (!res.ok) return { success: false, error: 'Server error: ' + res.status }
 
-      const data = await res.json()
+      const data = res.json()
       console.log('[getInstance] Got:', JSON.stringify(data))
 
       if (data.success && data.ip) {
-        // Store in global so sending engine can use it
         global._mailflowAssignedInstance = {
           ip:         data.ip,
           instanceId: data.instanceId,
@@ -368,12 +398,8 @@ function registerLicenseHandlers() {
       const licenseKey = global._mailflowLicenseKey || ''
       if (!licenseKey) return { success: false, error: 'No license key' }
 
-      const res = await fetch(LICENSE_SERVER + '/api/user/instance/release', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ licenseKey })
-      })
-      const data = await res.json()
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/instance/release', 'POST', { licenseKey })
+      const data = res.json()
       if (data.success) {
         global._mailflowAssignedInstance = null
         console.log('[releaseInstance] Instance released')

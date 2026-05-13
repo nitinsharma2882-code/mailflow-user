@@ -285,7 +285,7 @@ function Campaigns() {
                   </Button>
                 </>
               )}
-              <Button size="sm" variant="ghost" onClick={() => handleResend(c)}>🔁 Resend</Button>
+              <Button size="sm" variant="primary" onClick={() => handleResend(c)}>📋 Clone &amp; Reuse</Button>
               <Button size="sm" variant="ghost-danger" onClick={() => handleDelete(c.id)}>🗑 Delete</Button>
             </div>
           </div>

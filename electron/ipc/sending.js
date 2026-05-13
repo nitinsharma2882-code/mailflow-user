@@ -4,7 +4,48 @@ const nodemailer = require('nodemailer')
 const db = require('../../database/db')
 const { getSmtpConfig, isQuotaError } = require('./customSmtp')
 const { getTrackingUrl } = require('./tracking')
-const http = require('http')
+const http  = require('http')
+const https = require('https')
+
+function httpRequest(url, method, body, extraHeaders) {
+  return new Promise((resolve, reject) => {
+    const urlObj  = new URL(url)
+    const isHttps = urlObj.protocol === 'https:'
+    const mod     = isHttps ? https : http
+    const bodyStr = body ? JSON.stringify(body) : null
+    const options = {
+      hostname: urlObj.hostname,
+      port:     urlObj.port || (isHttps ? 443 : 80),
+      path:     urlObj.pathname + (urlObj.search || ''),
+      method:   method || 'GET',
+      headers:  Object.assign(
+        { 'Content-Type': 'application/json' },
+        bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {},
+        extraHeaders || {}
+      ),
+      rejectUnauthorized: false,
+    }
+    const req = mod.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try {
+          resolve({
+            ok:     res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            json:   () => JSON.parse(data),
+          })
+        } catch (e) {
+          reject(new Error('Invalid JSON response: ' + data.substring(0, 100)))
+        }
+      })
+    })
+    req.on('error',   (e) => reject(new Error('Network error: ' + e.message)))
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timeout after 15s')) })
+    if (bodyStr) req.write(bodyStr)
+    req.end()
+  })
+}
 
 // Railway tracking server — set this after deploying
 const RAILWAY_TRACKING_URL = 'https://mailflow-tracking-server-production.up.railway.app'
@@ -17,14 +58,10 @@ async function registerJobsWithTrackingServer(jobs) {
 
     const payload = jobs.map(j => ({ id: j.id, campaignId: j.campaign_id, email: j.email }))
 
-    const res = await fetch(`${url}/api/jobs/register`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-key': TRACKING_ADMIN_KEY },
-      body:    JSON.stringify({ jobs: payload }),
-    })
+    const res = await httpRequest(url + '/api/jobs/register', 'POST', { jobs: payload }, { 'x-admin-key': TRACKING_ADMIN_KEY })
 
     if (res.ok) {
-      const data = await res.json()
+      const data = res.json()
       console.log(`[Tracking] Registered ${data.registered} jobs with Railway server`)
     }
   } catch (err) {
@@ -166,7 +203,19 @@ class SmtpRotationManager {
 function registerSendingHandlers() {
 
   ipcMain.handle('sending:start', async (_, campaignId) => {
-    if (runningCampaigns.has(campaignId)) return { success: false, error: 'Campaign already running' }
+    console.log('[Mailflow] sending:start called for campaign:', campaignId)
+    console.log('[Mailflow] Active campaigns:', runningCampaigns.size)
+
+    const existing = runningCampaigns.get(campaignId)
+    if (existing && existing.paused === false && existing.cancelled === false) {
+      console.log('[Mailflow] Campaign already actively running, skipping')
+      return { success: false, error: 'Campaign already running' }
+    }
+    if (existing) {
+      console.log('[Mailflow] Cleaning up stale campaign state before restart')
+      runningCampaigns.delete(campaignId)
+    }
+
     return startCampaign(campaignId)
   })
 
@@ -336,13 +385,9 @@ function registerSendingHandlers() {
     // Fetch test accounts from license server
     let testEmails = []
     try {
-      const res = await fetch(LICENSE_SERVER_URL + '/api/user/test-accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ licenseKey: global._mailflowLicenseKey || '' })
-      })
+      const res = await httpRequest(LICENSE_SERVER_URL + '/api/user/test-accounts', 'POST', { licenseKey: global._mailflowLicenseKey || '' })
       if (res.ok) {
-        const data = await res.json()
+        const data = res.json()
         testEmails = (data.accounts || []).map(a => a.email)
       }
     } catch (err) {
@@ -395,15 +440,11 @@ function registerSendingHandlers() {
 
     // Register session with license server for IMAP checking
     try {
-      await fetch(LICENSE_SERVER_URL + '/api/user/test-sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          subject:    '[INBOX TEST] ' + subject,
-          sentTo:     results.filter(r => r.status === 'sent').map(r => r.email),
-          licenseKey: global._mailflowLicenseKey || '',
-        })
+      await httpRequest(LICENSE_SERVER_URL + '/api/user/test-sessions', 'POST', {
+        sessionId,
+        subject:    '[INBOX TEST] ' + subject,
+        sentTo:     results.filter(r => r.status === 'sent').map(r => r.email),
+        licenseKey: global._mailflowLicenseKey || '',
       })
     } catch (err) {
       console.log('[TestCampaign] Could not register session:', err.message)
@@ -441,6 +482,7 @@ function buildCustomSmtpServer(account) {
 }
 
 async function startCampaign(campaignId) {
+  console.log('[Mailflow] Active campaigns:', runningCampaigns.size)
   const database = db.get()
 
   const campaign = database.prepare(`

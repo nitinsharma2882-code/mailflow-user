@@ -33,6 +33,7 @@ function NewCampaign() {
   const [smtpValidated, setSmtpValidated]     = useState(false)
   const [smtpProgress, setSmtpProgress]       = useState({ completed: 0, total: 0 })
   const [smtpResults, setSmtpResults]         = useState({ working: [], failed: [], timeout: [], quotaExceeded: [] })
+  const [cloneBanner, setCloneBanner]         = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -74,6 +75,7 @@ function NewCampaign() {
             )
         }
 
+        setCloneBanner(true)
         clearResendCampaign()
         console.log('[Mailflow] Campaign data pre-filled from resend')
       }
@@ -393,6 +395,20 @@ function NewCampaign() {
 
   return (
     <div>
+      {cloneBanner && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#EFF6FF', border: '1px solid #3B82F6',
+          borderRadius: 'var(--rad)', padding: '10px 16px', marginBottom: 16,
+          fontSize: 13, color: '#1E40AF',
+        }}>
+          <span>📋 <strong>Cloned from a previous campaign.</strong> Settings have been pre-filled — review each step before sending.</span>
+          <button onClick={() => setCloneBanner(false)} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 16, color: '#3B82F6', lineHeight: 1, padding: '0 4px',
+          }}>×</button>
+        </div>
+      )}
       {/* Stepper */}
       <div className={styles.stepperWrap}>
         {STEPS.map((label, i) => {

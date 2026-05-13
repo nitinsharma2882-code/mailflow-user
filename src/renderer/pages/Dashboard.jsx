@@ -14,36 +14,44 @@ export default function Dashboard() {
     setLoadingInstance(true)
     try {
       const result = await window.api.license.getInstance()
-      if (result.success && result.ip) {
+      if (result && result.success && result.ip) {
         setInstanceInfo(result)
-        addToast('✅ Server refreshed — IP: ' + result.ip, 'success')
+        addToast('✅ Server assigned — IP: ' + result.ip, 'success')
+      } else if (result && result.error) {
+        addToast('⚠ ' + result.error, 'error')
       } else {
-        addToast(result.error || 'No instance assigned yet. Contact admin.', 'error')
+        addToast('No server assigned yet. Contact admin to add instances to pool.', 'error')
       }
     } catch (err) {
-      addToast('Error: ' + err.message, 'error')
+      addToast('Failed to fetch server: ' + err.message, 'error')
     } finally {
       setLoadingInstance(false)
     }
-  }, [])
+  }, [addToast])
 
   const handleReleaseInstance = useCallback(async () => {
+    if (!confirm('Release your current server and get a new IP from the pool?')) return
     setLoadingInstance(true)
     try {
-      await window.api.license.releaseInstance()
+      const releaseResult = await window.api.license.releaseInstance()
+      if (releaseResult && !releaseResult.success) {
+        addToast('⚠ Release failed: ' + (releaseResult.error || 'Unknown error'), 'error')
+        return
+      }
+      setInstanceInfo(null)
       const result = await window.api.license.getInstance()
-      if (result.success && result.ip) {
+      if (result && result.success && result.ip) {
         setInstanceInfo(result)
         addToast('✅ New server assigned: ' + result.ip, 'success')
       } else {
-        addToast(result.error || 'No instances available in pool', 'error')
+        addToast(result?.error || 'No instances available in pool right now', 'error')
       }
     } catch (err) {
-      addToast('Error: ' + err.message, 'error')
+      addToast('Error getting new server: ' + err.message, 'error')
     } finally {
       setLoadingInstance(false)
     }
-  }, [])
+  }, [addToast])
 
   useEffect(() => {
     loadData()
