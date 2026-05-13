@@ -330,26 +330,56 @@ function registerLicenseHandlers() {
   ipcMain.handle('license:getInstance', async function() {
     try {
       const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, error: 'No license key. Activate software first.' }
 
-      if (!licenseKey) {
-        return { success: false, error: 'No license key found. Please activate the software first.' }
-      }
-
-      console.log('[getInstance] Fetching instance for license:', licenseKey.substring(0, 10) + '...')
+      console.log('[getInstance] Fetching instance for:', licenseKey.substring(0, 10) + '...')
 
       const res = await fetch(LICENSE_SERVER + '/api/user/instance', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ licenseKey, hardwareId: '' })
+        body:    JSON.stringify({ licenseKey })
       })
-
       if (!res.ok) return { success: false, error: 'Server error: ' + res.status }
 
       const data = await res.json()
-      console.log('[getInstance] Response:', JSON.stringify(data))
+      console.log('[getInstance] Got:', JSON.stringify(data))
+
+      if (data.success && data.ip) {
+        // Store in global so sending engine can use it
+        global._mailflowAssignedInstance = {
+          ip:         data.ip,
+          instanceId: data.instanceId,
+          agentToken: data.agentToken || 'mailflow-agent-2026',
+          agentPort:  data.agentPort  || 3000,
+          assignedAt: data.assignedAt,
+        }
+        console.log('[getInstance] Agent instance stored:', data.ip)
+      }
+
       return data
     } catch (err) {
       console.log('[getInstance] Error:', err.message)
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('license:releaseInstance', async function() {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, error: 'No license key' }
+
+      const res = await fetch(LICENSE_SERVER + '/api/user/instance/release', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ licenseKey })
+      })
+      const data = await res.json()
+      if (data.success) {
+        global._mailflowAssignedInstance = null
+        console.log('[releaseInstance] Instance released')
+      }
+      return data
+    } catch (err) {
       return { success: false, error: err.message }
     }
   })

@@ -27,6 +27,24 @@ export default function Dashboard() {
     }
   }, [])
 
+  const handleReleaseInstance = useCallback(async () => {
+    setLoadingInstance(true)
+    try {
+      await window.api.license.releaseInstance()
+      const result = await window.api.license.getInstance()
+      if (result.success && result.ip) {
+        setInstanceInfo(result)
+        addToast('✅ New server assigned: ' + result.ip, 'success')
+      } else {
+        addToast(result.error || 'No instances available in pool', 'error')
+      }
+    } catch (err) {
+      addToast('Error: ' + err.message, 'error')
+    } finally {
+      setLoadingInstance(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadData()
   }, [])
@@ -154,14 +172,14 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-        <Button
-          onClick={handleRefreshInstance}
-          loading={loadingInstance}
-          variant="primary"
-          size="sm"
-        >
-          🔄 Refresh Server
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button onClick={handleRefreshInstance} loading={loadingInstance} variant="primary" size="sm">
+            🔄 Refresh Server
+          </Button>
+          <Button onClick={handleReleaseInstance} variant="ghost" size="sm" loading={loadingInstance}>
+            🔄 Get New IP
+          </Button>
+        </div>
       </div>
 
       {/* Stats row */}

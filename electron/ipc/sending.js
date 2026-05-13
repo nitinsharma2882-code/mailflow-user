@@ -4,6 +4,7 @@ const nodemailer = require('nodemailer')
 const db = require('../../database/db')
 const { getSmtpConfig, isQuotaError } = require('./customSmtp')
 const { getTrackingUrl } = require('./tracking')
+const http = require('http')
 
 // Railway tracking server — set this after deploying
 const RAILWAY_TRACKING_URL = 'https://mailflow-tracking-server-production.up.railway.app'
@@ -449,11 +450,190 @@ async function startCampaign(campaignId) {
   `).get(campaignId)
   if (!campaign) return { success: false, error: 'Campaign not found' }
 
-  console.log(`[Mailflow] Starting campaign: ${campaign.name}`)
-
-  const contacts = database.prepare(`SELECT id, email FROM contacts WHERE list_id=? AND status='valid'`).all(campaign.contact_list_id)
+  const contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(campaign.contact_list_id)
   if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
 
+  // ── CHECK IF USER HAS AN ASSIGNED AGENT INSTANCE ────────────────
+  const assignedInstance = global._mailflowAssignedInstance
+  if (assignedInstance && assignedInstance.ip && assignedInstance.agentToken) {
+    console.log('[Mailflow] Agent instance detected:', assignedInstance.ip)
+    console.log('[Mailflow] Routing campaign through agent...')
+    return startCampaignViaAgent(campaignId, campaign, contacts, assignedInstance)
+  }
+  // ── NO AGENT — SEND LOCALLY AS BEFORE ───────────────────────────
+  console.log('[Mailflow] No agent assigned — sending locally')
+  return startCampaignLocal(campaignId, campaign, contacts, database)
+}
+
+async function sendViaAgent(agentIp, agentPort, agentToken, jobData) {
+  return new Promise((resolve, reject) => {
+    const body    = JSON.stringify(jobData)
+    const options = {
+      hostname: agentIp,
+      port:     agentPort || 3000,
+      path:     '/send',
+      method:   'POST',
+      headers:  {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'x-agent-token':  agentToken || 'mailflow-agent-2026',
+      },
+      timeout: 30000,
+    }
+    const req = http.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch (e) { reject(new Error('Invalid response from agent')) }
+      })
+    })
+    req.on('error',   reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('Agent connection timeout')) })
+    req.write(body)
+    req.end()
+  })
+}
+
+async function getAgentStatus(agentIp, agentPort, agentToken, jobId) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: agentIp,
+      port:     agentPort || 3000,
+      path:     '/status/' + jobId,
+      method:   'GET',
+      headers:  { 'x-agent-token': agentToken || 'mailflow-agent-2026' },
+      timeout:  10000,
+    }
+    const req = http.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch (e) { reject(new Error('Invalid response')) }
+      })
+    })
+    req.on('error',   reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')) })
+    req.end()
+  })
+}
+
+async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
+  const database   = db.get()
+  const agentIp    = instance.ip
+  const agentPort  = instance.agentPort  || 3000
+  const agentToken = instance.agentToken || 'mailflow-agent-2026'
+  const jobId      = campaignId + '-' + Date.now()
+
+  let smtpCsv  = null
+  let smtpList = null
+  const sending_mode = campaign.sending_mode || 'existing_server'
+  let customSmtpList = []
+  try { customSmtpList = JSON.parse(campaign.custom_smtp_list || '[]') } catch {}
+
+  if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+    const validAccounts = customSmtpList.filter(a => a.email && (a.app_password || a.password) && a.working !== false)
+    smtpCsv = validAccounts.map(a => a.email + ',' + (a.app_password || a.password)).join('\n')
+  } else {
+    let serverIds = campaign.server_ids || '[]'
+    try { serverIds = JSON.parse(serverIds) } catch { serverIds = [] }
+    if (serverIds.length > 0) {
+      const servers = database.prepare('SELECT * FROM servers WHERE id IN (' + serverIds.map(() => '?').join(',') + ')').all(...serverIds)
+      smtpList = servers.filter(s => s.type === 'smtp').map(s => ({
+        email:    s.email,
+        password: s.password,
+        host:     s.host,
+        port:     s.port || 587,
+      }))
+    }
+  }
+
+  if ((!smtpCsv || smtpCsv.length === 0) && (!smtpList || smtpList.length === 0)) {
+    return { success: false, error: 'No SMTP accounts available for agent sending' }
+  }
+
+  database.prepare("UPDATE campaigns SET status='running', started_at=datetime('now'), total_recipients=?, sent_count=0, failed_count=0 WHERE id=?")
+    .run(contacts.length, campaignId)
+
+  runningCampaigns.set(campaignId, {
+    paused: false, cancelled: false,
+    mode: 'agent', agentIp, agentPort, agentToken, jobId,
+    campaign, totalContacts: contacts.length
+  })
+
+  try {
+    const result = await sendViaAgent(agentIp, agentPort, agentToken, {
+      jobId,
+      contacts:  contacts.map(c => ({ email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' })),
+      subject:   campaign.subject   || '',
+      fromName:  campaign.from_name || '',
+      htmlBody:  campaign.html_body || '',
+      textBody:  campaign.text_body || '',
+      smtpCsv,
+      smtpList,
+    })
+
+    if (!result.success) {
+      return { success: false, error: result.error || 'Agent rejected the job' }
+    }
+
+    console.log('[Mailflow] Job sent to agent:', agentIp, 'jobId:', jobId)
+    pollAgentProgress(campaignId, agentIp, agentPort, agentToken, jobId)
+
+    return { success: true, totalJobs: contacts.length, smtpCount: smtpList?.length || 0, mode: 'agent', agentIp }
+  } catch (err) {
+    console.error('[Mailflow] Agent connection failed:', err.message)
+    console.log('[Mailflow] Falling back to local sending...')
+    return startCampaignLocal(campaignId, campaign, contacts, database)
+  }
+}
+
+async function pollAgentProgress(campaignId, agentIp, agentPort, agentToken, jobId) {
+  const database = db.get()
+  const POLL_INTERVAL = 3000
+
+  const poll = async () => {
+    const state = runningCampaigns.get(campaignId)
+    if (!state || state.cancelled) return
+
+    try {
+      const status = await getAgentStatus(agentIp, agentPort, agentToken, jobId)
+
+      database.prepare("UPDATE campaigns SET sent_count=?, failed_count=? WHERE id=?")
+        .run(status.sent || 0, status.failed || 0, campaignId)
+
+      BrowserWindow.getAllWindows().forEach(w => {
+        try {
+          w.webContents.send('sending:progress', {
+            campaignId,
+            sent_count:       status.sent   || 0,
+            failed_count:     status.failed || 0,
+            total_recipients: status.total  || 0,
+            open_count:       0,
+            mode:             'agent',
+            agentIp,
+          })
+        } catch {}
+      })
+
+      if (status.status === 'completed' || status.status === 'stopped') {
+        finalizeCampaign(campaignId)
+        return
+      }
+
+      setTimeout(poll, POLL_INTERVAL)
+    } catch (err) {
+      console.error('[Mailflow] Poll error:', err.message)
+      setTimeout(poll, POLL_INTERVAL * 2)
+    }
+  }
+
+  setTimeout(poll, POLL_INTERVAL)
+}
+
+async function startCampaignLocal(campaignId, campaign, contacts, database) {
+  console.log(`[Mailflow] Starting campaign: ${campaign.name}`)
   console.log(`[Mailflow] ${contacts.length} valid contacts found`)
 
   let servers = []
