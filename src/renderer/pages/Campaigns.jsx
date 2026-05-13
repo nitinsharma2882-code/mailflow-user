@@ -94,17 +94,11 @@ function Campaigns() {
       const full = await window.api.campaigns.getById(campaign.id)
       const data = full || campaign
       setResendCampaign({
-        contact_list_id:  data.contact_list_id  || campaign.contact_list_id  || '',
-        template_id:      data.template_id       || campaign.template_id       || '',
-        server_ids:       data.server_ids        || campaign.server_ids        || '[]',
-        sending_mode:     data.sending_mode      || campaign.sending_mode      || 'existing_server',
-        custom_smtp_list: data.custom_smtp_list  || campaign.custom_smtp_list  || '[]',
-        aws_access_key:   data.aws_access_key    || '',
-        aws_secret_key:   data.aws_secret_key    || '',
-        aws_region:       data.aws_region        || 'us-east-1',
-        aws_sender_email: data.aws_sender_email  || '',
+        subject:   data.subject   || campaign.subject   || '',
+        from_name: data.from_name || campaign.from_name || '',
+        html_body: data.html_body || campaign.html_body || '',
       })
-      setActivePage('new-campaign')
+      setActivePage('multi-campaign')
     } catch (err) {
       addToast('Failed to load campaign: ' + err.message, 'error')
     }

@@ -13,7 +13,8 @@ import ActivationScreen from './pages/ActivationScreen'
 import Toast from './components/ui/Toast'
 import { useAppStore } from './store/useAppStore'
 
-const TestCampaign = React.lazy(() => import('./pages/TestCampaign'))
+const TestCampaign   = React.lazy(() => import('./pages/TestCampaign'))
+const MultiCampaign  = React.lazy(() => import('./pages/MultiCampaign'))
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -67,7 +68,8 @@ const PAGES = {
   analytics:       Analytics,
   verify:          VerifyEmails,
   smtp:            SmtpTester,
-  'test-campaign': TestCampaign,
+  'test-campaign':   TestCampaign,
+  'multi-campaign':  MultiCampaign,
 }
 
 export default function App() {

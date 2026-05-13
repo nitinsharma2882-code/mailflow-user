@@ -376,6 +376,53 @@ function registerSendingHandlers() {
     return { success: true, results, sent, failed, total: results.length }
   })
 
+  ipcMain.handle('sending:startMultiCampaignPage', async (_, pageData) => {
+    const {
+      pageId, contactListId, subject, fromName,
+      html_body, smtpAccounts, instanceIp, instanceToken
+    } = pageData
+
+    const database = db.get()
+    const contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(contactListId)
+    if (contacts.length === 0) return { success: false, error: 'No valid contacts in list' }
+
+    if (!instanceIp) return { success: false, error: 'No instance IP provided for this page' }
+
+    const jobId      = 'multi-page-' + pageId + '-' + Date.now()
+    const agentToken = instanceToken || 'mailflow-agent-2026'
+
+    let smtpCsv = null
+    if (smtpAccounts && smtpAccounts.length > 0) {
+      smtpCsv = smtpAccounts.map(a => a.email + ',' + (a.app_password || a.password || '')).join('\n')
+    }
+
+    if (!smtpCsv) return { success: false, error: 'No SMTP accounts provided for page ' + pageId }
+
+    try {
+      const result = await sendViaAgent(instanceIp, 3000, agentToken, {
+        jobId,
+        contacts: contacts.map(c => ({
+          email:     c.email,
+          name:      c.name      || '',
+          address:   c.address   || '',
+          unique_id: c.unique_id || '',
+        })),
+        subject,
+        fromName,
+        htmlBody: html_body,
+        smtpCsv,
+      })
+
+      if (result.success) {
+        return { success: true, total: contacts.length, jobId, mode: 'agent', ip: instanceIp }
+      } else {
+        return { success: false, error: result.error || 'Agent rejected the job' }
+      }
+    } catch (err) {
+      return { success: false, error: 'Agent unreachable (' + instanceIp + '): ' + err.message }
+    }
+  })
+
   ipcMain.handle('sending:runTestCampaign', async (_, campaignData) => {
     const { subject, fromName, html, sendMode, serverId, smtpEmail, smtpPass, awsKey, awsSecret, awsRegion, awsFrom, csvAccounts } = campaignData
     const database = db.get()

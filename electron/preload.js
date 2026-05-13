@@ -70,8 +70,9 @@ contextBridge.exposeInMainWorld('api', {
     sendTest:       (data)              => ipcRenderer.invoke('sending:test', data),
     getQueueStatus: (campaignId)        => ipcRenderer.invoke('sending:queueStatus', campaignId),
     exportResults:  (campaignId, type)  => ipcRenderer.invoke('sending:exportResults', campaignId, type),
-    testCampaign:    (data)              => ipcRenderer.invoke('sending:testCampaign', data),
-    runTestCampaign: (data)              => ipcRenderer.invoke('sending:runTestCampaign', data),
+    testCampaign:           (data) => ipcRenderer.invoke('sending:testCampaign', data),
+    runTestCampaign:        (data) => ipcRenderer.invoke('sending:runTestCampaign', data),
+    startMultiCampaignPage: (data) => ipcRenderer.invoke('sending:startMultiCampaignPage', data),
   },
 
   // Email verification
