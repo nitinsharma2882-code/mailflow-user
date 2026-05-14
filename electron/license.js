@@ -429,6 +429,18 @@ function registerLicenseHandlers() {
       return { success: false, error: err.message }
     }
   })
+
+  ipcMain.handle('license:getInstances', async function() {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, instances: [], error: 'No license key' }
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/instances', 'POST', { licenseKey })
+      if (!res.ok) return { success: false, instances: [], error: 'Server error' }
+      return res.json()
+    } catch (err) {
+      return { success: false, instances: [], error: err.message }
+    }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }

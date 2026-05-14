@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('api', {
     saveActivation: (key, license, hardwareId)  => ipcRenderer.invoke('license:saveActivation', key, license, hardwareId),
     getInstance:      ()                           => ipcRenderer.invoke('license:getInstance'),
     releaseInstance:  ()                           => ipcRenderer.invoke('license:releaseInstance'),
+    getInstances:     ()                           => ipcRenderer.invoke('license:getInstances'),
     getTestAccounts:  ()                           => ipcRenderer.invoke('license:getTestAccounts'),
     getTestResults:   (sessionId)                  => ipcRenderer.invoke('license:getTestResults', sessionId),
   },

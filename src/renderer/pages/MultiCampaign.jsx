@@ -22,9 +22,6 @@ export default function MultiCampaign() {
   const [launching, setLaunching] = useState(false)
   const [activePage, setActivePageNum] = useState(1)
 
-  const LICENSE_SERVER = 'https://mailflow-license-server-production.up.railway.app'
-  const ADMIN_KEY = 'mailflow-admin-2026'
-
   useEffect(() => {
     if (resendCampaign) {
       setTemplate({
@@ -39,15 +36,19 @@ export default function MultiCampaign() {
 
   async function loadInstances() {
     try {
-      const res = await fetch(LICENSE_SERVER + '/api/admin/instances', {
-        headers: { 'x-admin-key': ADMIN_KEY }
-      })
-      const data = await res.json()
-      if (data.success) {
-        setPoolInstances((data.instances || []).filter(i => i.status === 'ready' || i.status === 'assigned'))
+      const result = await window.api.license.getInstances()
+      if (result.success && result.instances) {
+        setPoolInstances(result.instances)
+        if (result.instances.length === 0) {
+          addToast('No instances available. Ask admin to add instances to pool.', 'error')
+        }
+      } else {
+        console.error('Failed to load instances:', result.error)
+        addToast('Could not load instances: ' + (result.error || 'Unknown error'), 'error')
       }
     } catch (err) {
-      console.error('Failed to load instances:', err.message)
+      console.error('loadInstances error:', err.message)
+      addToast('Error loading instances: ' + err.message, 'error')
     }
   }
 
@@ -347,10 +348,15 @@ export default function MultiCampaign() {
                   ● {page.instanceIp}
                 </div>
               )}
-              <button onClick={loadInstances}
-                style={{ marginTop: 8, padding: '4px 8px', background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', fontSize: 11, cursor: 'pointer', color: 'var(--txt2)' }}>
-                ↻ Refresh IPs
-              </button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                <button onClick={loadInstances}
+                  style={{ padding: '5px 10px', background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', fontSize: 11, cursor: 'pointer', color: 'var(--txt2)' }}>
+                  ↻ Refresh IPs
+                </button>
+                <span style={{ fontSize: 11, color: 'var(--txt3)' }}>
+                  {poolInstances.length} instance(s) available
+                </span>
+              </div>
             </div>
           </div>
 
