@@ -441,6 +441,41 @@ function registerLicenseHandlers() {
       return { success: false, instances: [], error: err.message }
     }
   })
+
+  ipcMain.handle('license:trackCampaignInstance', async function(_, data) {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, error: 'No license key' }
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/campaign-instance', 'POST', {
+        licenseKey,
+        instanceIp:  data.instanceIp,
+        instanceId:  data.instanceId  || '',
+        campaignId:  data.campaignId  || '',
+        pageNumber:  data.pageNumber  || 1,
+        purpose:     data.purpose     || 'campaign',
+      })
+      return res.json()
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('license:updateCampaignInstance', async function(_, data) {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, error: 'No license key' }
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/campaign-instance/update', 'POST', {
+        licenseKey,
+        instanceIp:  data.instanceIp,
+        campaignId:  data.campaignId  || '',
+        pageNumber:  data.pageNumber  || 1,
+        status:      data.status      || 'completed',
+      })
+      return res.json()
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }

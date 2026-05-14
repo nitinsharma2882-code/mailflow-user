@@ -74,6 +74,7 @@ function getActiveTrackingUrl() {
 }
 
 const runningCampaigns = new Map()
+const activeMultiJobs  = new Map()
 
 const PROVIDER_LIMITS = {
   'gmail.com':        15,
@@ -376,50 +377,85 @@ function registerSendingHandlers() {
     return { success: true, results, sent, failed, total: results.length }
   })
 
-  ipcMain.handle('sending:startMultiCampaignPage', async (_, pageData) => {
-    const {
-      pageId, contactListId, subject, fromName,
-      html_body, smtpAccounts, instanceIp, instanceToken
-    } = pageData
+  ipcMain.handle('sending:startMultiCampaignPage', async function(_, pageData) {
+    var pageId         = pageData.pageId
+    var contactListId  = pageData.contactListId
+    var subject        = pageData.subject
+    var fromName       = pageData.fromName
+    var html_body      = pageData.html_body
+    var smtpAccounts   = pageData.smtpAccounts
+    var instanceIp     = pageData.instanceIp
+    var instanceToken  = pageData.instanceToken
+    var campaignPageId = pageData.campaignPageId
 
-    const database = db.get()
-    const contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(contactListId)
-    if (contacts.length === 0) return { success: false, error: 'No valid contacts in list' }
+    var database = db.get()
+    var contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(contactListId)
+    if (contacts.length === 0) return { success: false, error: 'No valid contacts in list for page ' + pageId }
+    if (!instanceIp) return { success: false, error: 'No instance IP assigned for page ' + pageId }
 
-    if (!instanceIp) return { success: false, error: 'No instance IP provided for this page' }
+    var jobId      = 'multi-' + pageId + '-' + Date.now()
+    var agentToken = instanceToken || 'mailflow-agent-2026'
 
-    const jobId      = 'multi-page-' + pageId + '-' + Date.now()
-    const agentToken = instanceToken || 'mailflow-agent-2026'
-
-    let smtpCsv = null
+    var smtpCsv = null
     if (smtpAccounts && smtpAccounts.length > 0) {
-      smtpCsv = smtpAccounts.map(a => a.email + ',' + (a.app_password || a.password || '')).join('\n')
+      smtpCsv = smtpAccounts.map(function(a) {
+        return a.email + ',' + (a.app_password || a.password || '')
+      }).join('\n')
     }
-
-    if (!smtpCsv) return { success: false, error: 'No SMTP accounts provided for page ' + pageId }
+    if (!smtpCsv) return { success: false, error: 'No SMTP accounts for page ' + pageId }
 
     try {
-      const result = await sendViaAgent(instanceIp, 3000, agentToken, {
-        jobId,
-        contacts: contacts.map(c => ({
-          email:     c.email,
-          name:      c.name      || '',
-          address:   c.address   || '',
-          unique_id: c.unique_id || '',
-        })),
-        subject,
-        fromName,
+      var result = await sendViaAgent(instanceIp, 3000, agentToken, {
+        jobId:    jobId,
+        contacts: contacts.map(function(c) {
+          return { email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' }
+        }),
+        subject:  subject,
+        fromName: fromName,
         htmlBody: html_body,
-        smtpCsv,
+        smtpCsv:  smtpCsv,
       })
 
-      if (result.success) {
-        return { success: true, total: contacts.length, jobId, mode: 'agent', ip: instanceIp }
-      } else {
-        return { success: false, error: result.error || 'Agent rejected the job' }
+      if (!result.success) {
+        return { success: false, error: result.error || 'Agent rejected job for page ' + pageId }
       }
+
+      var pageKey = 'page-' + pageId
+      activeMultiJobs.set(pageKey, {
+        jobId:          jobId,
+        agentIp:        instanceIp,
+        agentPort:      3000,
+        agentToken:     agentToken,
+        campaignPageId: campaignPageId || pageKey,
+        total:          contacts.length,
+        sent:           0,
+        failed:         0,
+        status:         'running',
+      })
+
+      pollMultiJobProgress(pageKey)
+
+      return { success: true, jobId: jobId, total: contacts.length, pageKey: pageKey }
     } catch (err) {
       return { success: false, error: 'Agent unreachable (' + instanceIp + '): ' + err.message }
+    }
+  })
+
+  ipcMain.handle('sending:getMultiJobStatus', function(_, pageKey) {
+    var job = activeMultiJobs.get(pageKey)
+    if (!job) return { found: false }
+    return Object.assign({ found: true }, job)
+  })
+
+  ipcMain.handle('sending:stopMultiJob', async function(_, pageKey) {
+    var job = activeMultiJobs.get(pageKey)
+    if (!job) return { success: false, error: 'Job not found' }
+    try {
+      await httpRequest('http://' + job.agentIp + ':' + job.agentPort + '/stop/' + job.jobId, 'POST', {}, { 'x-agent-token': job.agentToken })
+      job.status = 'stopped'
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
     }
   })
 
@@ -1252,5 +1288,80 @@ function injectTrackingPixel(html, jobId, trackingUrl) {
 }
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
+
+function pollMultiJobProgress(pageKey) {
+  var POLL_INTERVAL = 3000
+  var MAX_ERRORS    = 5
+  var errorCount    = 0
+
+  var poll = async function() {
+    var job = activeMultiJobs.get(pageKey)
+    if (!job) return
+    if (job.status === 'completed' || job.status === 'stopped' || job.status === 'failed') return
+
+    try {
+      var status = await getAgentStatus(job.agentIp, job.agentPort, job.agentToken, job.jobId)
+
+      job.sent   = status.sent   || 0
+      job.failed = status.failed || 0
+      job.total  = status.total  || job.total
+      job.status = status.status || 'running'
+
+      BrowserWindow.getAllWindows().forEach(function(w) {
+        try {
+          w.webContents.send('multicampaign:progress', {
+            pageKey: pageKey,
+            jobId:   job.jobId,
+            sent:    job.sent,
+            failed:  job.failed,
+            total:   job.total,
+            status:  job.status,
+            agentIp: job.agentIp,
+          })
+        } catch (e) {}
+      })
+
+      errorCount = 0
+
+      if (job.status === 'completed' || job.status === 'stopped') {
+        BrowserWindow.getAllWindows().forEach(function(w) {
+          try {
+            w.webContents.send('multicampaign:complete', {
+              pageKey: pageKey,
+              jobId:   job.jobId,
+              sent:    job.sent,
+              failed:  job.failed,
+              total:   job.total,
+            })
+          } catch (e) {}
+        })
+        activeMultiJobs.delete(pageKey)
+        return
+      }
+
+      setTimeout(poll, POLL_INTERVAL)
+    } catch (err) {
+      errorCount++
+      console.error('[MultiCampaign] Poll error for', pageKey, ':', err.message)
+      if (errorCount >= MAX_ERRORS) {
+        job.status = 'failed'
+        BrowserWindow.getAllWindows().forEach(function(w) {
+          try {
+            w.webContents.send('multicampaign:progress', {
+              pageKey: pageKey,
+              status:  'failed',
+              error:   'Lost connection to agent: ' + err.message,
+            })
+          } catch (e) {}
+        })
+        activeMultiJobs.delete(pageKey)
+        return
+      }
+      setTimeout(poll, POLL_INTERVAL * 2)
+    }
+  }
+
+  setTimeout(poll, POLL_INTERVAL)
+}
 
 module.exports = { registerSendingHandlers, deliverEmail }
