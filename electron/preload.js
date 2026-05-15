@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld('api', {
     assignPageInstance:      (data)   => ipcRenderer.invoke('license:assignPageInstance', data),
     getTestAccounts:         ()       => ipcRenderer.invoke('license:getTestAccounts'),
     getTestResults:          (sid)    => ipcRenderer.invoke('license:getTestResults', sid),
+    getPlan:                 ()       => ipcRenderer.invoke('license:getPlan'),
   },
 
   // File dialogs

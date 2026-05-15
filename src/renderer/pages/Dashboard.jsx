@@ -9,6 +9,7 @@ export default function Dashboard() {
 
   const [instanceInfo, setInstanceInfo]         = useState(null)
   const [loadingInstance, setLoadingInstance]   = useState(false)
+  const [planInfo, setPlanInfo]                 = useState(null)
 
   const handleRefreshInstance = useCallback(async () => {
     setLoadingInstance(true)
@@ -57,6 +58,7 @@ export default function Dashboard() {
   useEffect(() => {
     loadData()
     autoLoadInstance()
+    loadPlan()
   }, [])
 
   async function autoLoadInstance() {
@@ -68,6 +70,13 @@ export default function Dashboard() {
     } catch (err) {
       console.log('[Dashboard] No instance assigned yet:', err.message)
     }
+  }
+
+  async function loadPlan() {
+    try {
+      const result = await window.api.license.getPlan()
+      if (result && result.success) setPlanInfo(result)
+    } catch {}
   }
 
   async function loadData() {
@@ -202,6 +211,46 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      {/* Instance Plan card */}
+      {planInfo && (
+        <div style={{
+          background: 'var(--bg2)', border: '1px solid var(--bdr)',
+          borderRadius: 'var(--rad-l)', padding: '14px 20px',
+          marginBottom: 20, display: 'flex', alignItems: 'center', gap: 16
+        }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10, fontSize: 18,
+            background: planInfo.plan === 'premium' ? 'rgba(245,166,35,0.12)' : planInfo.plan === 'standard' ? 'rgba(74,58,255,0.12)' : 'rgba(255,255,255,0.06)',
+            border: '1px solid ' + (planInfo.plan === 'premium' ? 'rgba(245,166,35,0.3)' : planInfo.plan === 'standard' ? 'rgba(74,58,255,0.3)' : 'var(--bdr)'),
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            {planInfo.plan === 'premium' ? '⭐' : planInfo.plan === 'standard' ? '🔷' : '🔲'}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Instance Plan</span>
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px',
+                background: planInfo.plan === 'premium' ? 'rgba(245,166,35,0.15)' : planInfo.plan === 'standard' ? 'rgba(74,58,255,0.15)' : 'rgba(255,255,255,0.08)',
+                color: planInfo.plan === 'premium' ? '#F5A623' : planInfo.plan === 'standard' ? '#7B72FF' : 'var(--txt2)'
+              }}>
+                {planInfo.label || planInfo.plan}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--txt2)' }}>
+              {planInfo.usedInstances || 0} / {planInfo.maxInstances || 1} instance{(planInfo.maxInstances || 1) !== 1 ? 's' : ''} used
+              <div style={{ marginTop: 6, height: 4, background: 'var(--bdr)', borderRadius: 2, width: 200, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 2,
+                  width: ((planInfo.usedInstances || 0) / (planInfo.maxInstances || 1) * 100) + '%',
+                  background: planInfo.plan === 'premium' ? '#F5A623' : planInfo.plan === 'standard' ? '#7B72FF' : '#888'
+                }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats row */}
       <div className={styles.statGrid}>

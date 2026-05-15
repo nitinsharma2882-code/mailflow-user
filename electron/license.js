@@ -490,6 +490,18 @@ function registerLicenseHandlers() {
     }
   })
 
+  ipcMain.handle('license:getPlan', async function() {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, error: 'No license key' }
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/plan', 'POST', { licenseKey })
+      if (!res.ok) return { success: false, error: 'Server error' }
+      return res.json()
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
   ipcMain.handle('license:assignPageInstance', async function(_, data) {
     try {
       const licenseKey = global._mailflowLicenseKey || ''
