@@ -476,6 +476,23 @@ function registerLicenseHandlers() {
       return { success: false, error: err.message }
     }
   })
+
+  ipcMain.handle('license:assignPageInstance', async function(_, data) {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, error: 'No license key' }
+      const res = await httpRequest(LICENSE_SERVER + '/api/user/instance/assign-page', 'POST', {
+        licenseKey,
+        instanceIp:  data.instanceIp,
+        purpose:     data.purpose    || 'page',
+        pageNumber:  data.pageNumber || 1,
+        campaignId:  data.campaignId || '',
+      })
+      return res.json()
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }

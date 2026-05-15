@@ -30,24 +30,25 @@ export default function Dashboard() {
   }, [addToast])
 
   const handleReleaseInstance = useCallback(async () => {
-    if (!confirm('Release your current server and get a new IP from the pool?')) return
+    const confirmed = confirm(
+      'Release your current instance?\n\n' +
+      '• Your current IP will be terminated\n' +
+      '• A fresh instance will be auto-created\n' +
+      '• You will get a new IP when ready\n\n' +
+      'This may take 5-10 minutes.'
+    )
+    if (!confirmed) return
     setLoadingInstance(true)
     try {
-      const releaseResult = await window.api.license.releaseInstance()
-      if (releaseResult && !releaseResult.success) {
-        addToast('⚠ Release failed: ' + (releaseResult.error || 'Unknown error'), 'error')
-        return
-      }
-      setInstanceInfo(null)
-      const result = await window.api.license.getInstance()
-      if (result && result.success && result.ip) {
-        setInstanceInfo(result)
-        addToast('✅ New server assigned: ' + result.ip, 'success')
+      const result = await window.api.license.releaseInstance()
+      if (result && result.success) {
+        setInstanceInfo(null)
+        addToast('✅ Instance releasing — a fresh one will be auto-created shortly', 'success')
       } else {
-        addToast(result?.error || 'No instances available in pool right now', 'error')
+        addToast('❌ ' + (result?.error || 'Release failed'), 'error')
       }
     } catch (err) {
-      addToast('Error getting new server: ' + err.message, 'error')
+      addToast('❌ Error: ' + err.message, 'error')
     } finally {
       setLoadingInstance(false)
     }
@@ -196,8 +197,8 @@ export default function Dashboard() {
           <Button onClick={handleRefreshInstance} loading={loadingInstance} variant="primary" size="sm">
             🔄 Refresh Server
           </Button>
-          <Button onClick={handleReleaseInstance} variant="ghost" size="sm" loading={loadingInstance}>
-            🔄 Get New IP
+          <Button onClick={handleReleaseInstance} variant="ghost-danger" size="sm" loading={loadingInstance}>
+            🔄 Release Instance
           </Button>
         </div>
       </div>

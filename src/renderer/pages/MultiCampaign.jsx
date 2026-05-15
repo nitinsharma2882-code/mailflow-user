@@ -276,6 +276,12 @@ export default function MultiCampaign() {
             pageNumber: page.id,
             purpose:    'multi-campaign-page',
           }).catch(function() {})
+          window.api.license.assignPageInstance({
+            instanceIp: page.instanceIp,
+            purpose:    'multi-campaign-page-' + page.id,
+            pageNumber: page.id,
+            campaignId: campaignId,
+          }).catch(function() {})
           addToast('Page ' + page.id + ' launched — ' + result.total + ' emails', 'success')
         } else {
           updatePage(page.id, { status: 'failed', error: result.error })

@@ -124,6 +124,7 @@ contextBridge.exposeInMainWorld('api', {
     getInstances:            ()       => ipcRenderer.invoke('license:getInstances'),
     trackCampaignInstance:   (data)   => ipcRenderer.invoke('license:trackCampaignInstance', data),
     updateCampaignInstance:  (data)   => ipcRenderer.invoke('license:updateCampaignInstance', data),
+    assignPageInstance:      (data)   => ipcRenderer.invoke('license:assignPageInstance', data),
     getTestAccounts:         ()       => ipcRenderer.invoke('license:getTestAccounts'),
     getTestResults:          (sid)    => ipcRenderer.invoke('license:getTestResults', sid),
   },
