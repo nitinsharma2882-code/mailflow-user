@@ -46,6 +46,16 @@ function httpRequest(url, method, body, extraHeaders) {
   })
 }
 
+// Fire-and-forget log — never blocks, never throws
+function fireLog(endpoint, data) {
+  setImmediate(function() {
+    const licenseKey = global._mailflowLicenseKey || ''
+    httpRequest(LICENSE_SERVER + endpoint, 'POST', Object.assign({ licenseKey }, data))
+      .catch(function() {})
+  })
+}
+global._freqmailLog = fireLog
+
 // Disable TLS verification for Railway
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
@@ -335,6 +345,7 @@ async function activateLicense(licenseKey) {
         lastVerified: new Date().toISOString()
       }, result.license))
       startSessionCheck()
+      fireLog('/api/log/activity', { event: 'license_activated', details: 'Activated on ' + machineName, hardware_id: hardwareId })
       return { success: true, license: result.license }
     }
     return { success: false, error: result.error }
@@ -403,6 +414,7 @@ function registerLicenseHandlers() {
           agentPort:  data.agentPort  || 3000,
           assignedAt: data.assignedAt,
         }
+        fireLog('/api/log/activity', { event: 'instance_assigned', details: 'Instance assigned: ' + data.ip, hardware_id: getHardwareId() })
         console.log('[getInstance] Agent instance stored:', data.ip)
       }
 
@@ -422,6 +434,7 @@ function registerLicenseHandlers() {
       const data = res.json()
       if (data.success) {
         global._mailflowAssignedInstance = null
+        fireLog('/api/log/activity', { event: 'instance_released', details: 'Instance released', hardware_id: getHardwareId() })
         console.log('[releaseInstance] Instance released')
       }
       return data

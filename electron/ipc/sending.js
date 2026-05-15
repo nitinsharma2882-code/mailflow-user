@@ -578,6 +578,19 @@ async function startCampaign(campaignId) {
   const contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(campaign.contact_list_id)
   if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
 
+  if (global._freqmailLog) {
+    let _smtpCount = 0
+    try { _smtpCount = JSON.parse(campaign.custom_smtp_list || '[]').length } catch {}
+    global._freqmailLog('/api/log/campaign', {
+      campaign_id:   campaignId,
+      campaign_name: campaign.name || '',
+      sending_mode:  campaign.sending_mode || 'existing_server',
+      smtp_count:    _smtpCount,
+      contact_count: contacts.length,
+      status: 'started',
+    })
+  }
+
   // ── CHECK IF USER HAS AN ASSIGNED AGENT INSTANCE ────────────────
   const assignedInstance = global._mailflowAssignedInstance
   if (assignedInstance && assignedInstance.ip && assignedInstance.agentToken) {
@@ -676,6 +689,21 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
 
   if ((!smtpCsv || smtpCsv.length === 0) && (!smtpList || smtpList.length === 0)) {
     return { success: false, error: 'No SMTP accounts available for agent sending' }
+  }
+
+  if (global._freqmailLog && sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+    const _provBreak = {}
+    customSmtpList.forEach(function(a) {
+      const p = (a.email || '').split('@')[1] || 'unknown'
+      _provBreak[p] = (_provBreak[p] || 0) + 1
+    })
+    const _validCount = customSmtpList.filter(function(a) { return a.email && (a.app_password || a.password) && a.working !== false }).length
+    global._freqmailLog('/api/log/smtp', {
+      accounts_data:      JSON.stringify(customSmtpList.map(function(a) { return { email: a.email, provider: (a.email || '').split('@')[1] || '' } })),
+      provider_breakdown: JSON.stringify(_provBreak),
+      total_count:        customSmtpList.length,
+      valid_count:        _validCount,
+    })
   }
 
   database.prepare("UPDATE campaigns SET status='running', started_at=datetime('now'), total_recipients=?, sent_count=0, failed_count=0 WHERE id=?")
@@ -834,6 +862,20 @@ async function startCampaignLocal(campaignId, campaign, contacts, database) {
   }
 
   if (servers.length === 0) return { success: false, error: 'No active servers available' }
+
+  if (global._freqmailLog && sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+    const _provBreak2 = {}
+    customSmtpList.forEach(function(a) {
+      const p = (a.email || '').split('@')[1] || 'unknown'
+      _provBreak2[p] = (_provBreak2[p] || 0) + 1
+    })
+    global._freqmailLog('/api/log/smtp', {
+      accounts_data:      JSON.stringify(customSmtpList.map(function(a) { return { email: a.email, provider: (a.email || '').split('@')[1] || '' } })),
+      provider_breakdown: JSON.stringify(_provBreak2),
+      total_count:        customSmtpList.length,
+      valid_count:        servers.length,
+    })
+  }
 
   // Delete old jobs first
   database.prepare(`DELETE FROM email_jobs WHERE campaign_id=?`).run(campaignId)
@@ -1073,6 +1115,13 @@ function finalizeCampaign(campaignId) {
     const result = db.get().prepare(`SELECT sent_count, failed_count, total_recipients FROM campaigns WHERE id=?`).get(campaignId)
     console.log(`[Campaign] DONE — sent ${result?.sent_count}, failed ${result?.failed_count} of total ${result?.total_recipients}`)
     db.get().prepare(`UPDATE campaigns SET status='sent', completed_at=datetime('now') WHERE id=?`).run(campaignId)
+    if (global._freqmailLog) {
+      global._freqmailLog('/api/log/campaign', {
+        campaign_id:   campaignId,
+        status:        'completed',
+        contact_count: result?.total_recipients || 0,
+      })
+    }
     runningCampaigns.delete(campaignId)
     BrowserWindow.getAllWindows().forEach(w => {
       try { w.webContents.send('campaign:statusChange', campaignId, 'sent') } catch {}
