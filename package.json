@@ -1,7 +1,7 @@
 {
   "name": "mailflow",
   "version": "1.0.0",
-  "description": "Bulk email marketing desktop application",
+  "description": "FreqMail — Send Smart. Stay Ahead.",
   "main": "electron/main.js",
   "author": {
     "name": "Your Name",
@@ -55,8 +55,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.mailflow.app",
-    "productName": "Mailflow",
+    "appId": "com.freqmail.app",
+    "productName": "FreqMail",
     "copyright": "Copyright 2026 Your Name",
     "directories": {
       "output": "dist-electron",
@@ -103,7 +103,7 @@
       "allowElevation": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Mailflow",
+      "shortcutName": "FreqMail",
       "deleteAppDataOnUninstall": false
     },
     "mac": {

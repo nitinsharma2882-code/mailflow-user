@@ -29,15 +29,29 @@ export default function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       {/* Logo */}
-      <div className={styles.logo}>
-        <div className={styles.logoMark}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <rect x="1" y="3" width="16" height="12" rx="2" stroke="white" strokeWidth="1.4"/>
-            <path d="M1 6.5L9 11.5L17 6.5" stroke="white" strokeWidth="1.4"/>
-          </svg>
+      <div style={{
+        padding: '20px 16px 14px',
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        marginBottom: 8,
+      }}>
+        <img
+          src="/assets/freqmail-logo.png"
+          alt="FreqMail"
+          style={{
+            width: '100%', maxWidth: 152, height: 'auto',
+            objectFit: 'contain', display: 'block', marginBottom: 4,
+          }}
+          onError={function(e) { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }}
+        />
+        <div style={{display: 'none', fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px', marginBottom: 2}}>
+          <span style={{color: '#fff'}}>Freq</span><span style={{color: '#1565FF'}}>Mail</span>
         </div>
-        <span className={styles.logoName}>Mailflow</span>
-        <span className={styles.logoTag}>User</span>
+        <div style={{
+          fontSize: 10, color: 'rgba(255,255,255,0.4)',
+          letterSpacing: '0.5px', textTransform: 'uppercase',
+        }}>
+          Send Smart. Stay Ahead.
+        </div>
       </div>
 
       {/* Nav */}

@@ -32,7 +32,7 @@ function createWindow() {
       nodeIntegration: false,
     },
     show:  false,
-    title: 'Mailflow',
+    title: 'FreqMail',
   })
 
   // Set Content Security Policy

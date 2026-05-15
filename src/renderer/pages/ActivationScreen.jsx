@@ -69,16 +69,16 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
                 fontSize: 13, color: '#5A5A72', marginTop: 16 }}>
                 Plan: <strong>{PLAN_LABELS[success.plan] || success.plan}</strong>
                 {' · '}Expires: <strong>{new Date(success.expiresAt).toLocaleDateString()}</strong>
-                {' · '}<strong style={{ color: '#4A3AFF' }}>{success.daysRemaining} days remaining</strong>
+                {' · '}<strong style={{ color: '#1565FF' }}>{success.daysRemaining} days remaining</strong>
               </div>
             ) : (
               <div style={{ background: '#EEF0FF', borderRadius: 8, padding: '12px 16px',
-                fontSize: 13, color: '#4A3AFF', marginTop: 16, fontWeight: 600 }}>
+                fontSize: 13, color: '#1565FF', marginTop: 16, fontWeight: 600 }}>
                 🎉 Lifetime license — never expires
               </div>
             )}
             <p style={{ fontSize: 13, color: '#9898B0', marginTop: 16 }}>
-              Loading Mailflow...
+              Loading FreqMail...
             </p>
           </div>
         </div>
@@ -90,19 +90,20 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
     <div style={outerStyle}>
       <div style={cardStyle}>
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
-          <div style={{
-            width: 42, height: 42, background: '#4A3AFF',
-            borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
-            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-              <rect x="1" y="4" width="20" height="14" rx="2" stroke="white" strokeWidth="1.5"/>
-              <path d="M1 8l10 6 10-6" stroke="white" strokeWidth="1.5"/>
-            </svg>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <img
+            src="/assets/freqmail-logo.png"
+            alt="FreqMail"
+            style={{ maxWidth: 200, height: 'auto', marginBottom: 8 }}
+            onError={function(e) { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }}
+          />
+          <div style={{ display: 'none' }}>
+            <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-1px', marginBottom: 4 }}>
+              <span style={{ color: '#0D2C5B' }}>Freq</span><span style={{ color: '#1565FF' }}>Mail</span>
+            </div>
           </div>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.3px' }}>Mailflow</div>
-            <div style={{ fontSize: 12, color: '#9898B0' }}>Bulk email marketing platform</div>
+          <div style={{ fontSize: 11, color: '#9898B0', letterSpacing: '1px', textTransform: 'uppercase' }}>
+            Send Smart. Stay Ahead.
           </div>
         </div>
 
@@ -121,7 +122,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
           {expiredPlan ? 'Renew your license' : 'Activate your license'}
         </h1>
         <p style={{ fontSize: 14, color: '#5A5A72', marginBottom: 28, lineHeight: 1.6 }}>
-          Enter your license key below. You received this after purchasing Mailflow.
+          Enter your license key below. You received this after purchasing FreqMail.
         </p>
 
         {/* Input */}
@@ -160,7 +161,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
           disabled={loading || !key.trim()}
           style={{
             width: '100%', padding: '13px',
-            background: loading || !key.trim() ? '#B0B0C0' : '#4A3AFF',
+            background: loading || !key.trim() ? '#B0B0C0' : '#1565FF',
             color: '#fff', border: 'none', borderRadius: 8,
             fontSize: 14, fontWeight: 600,
             cursor: loading || !key.trim() ? 'not-allowed' : 'pointer',
@@ -168,7 +169,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
             marginBottom: 20, transition: 'background 0.12s'
           }}
         >
-          {loading ? '⏳ Verifying...' : '🔑 Activate Mailflow'}
+          {loading ? '⏳ Verifying...' : '🔑 Activate FreqMail'}
         </button>
 
         {/* Plans info */}
@@ -199,7 +200,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
         <div style={{ borderTop: '1px solid #F0F0F4', paddingTop: 16,
           fontSize: 12, color: '#9898B0' }}>
           Need a license?{' '}
-          <span style={{ color: '#4A3AFF', cursor: 'pointer', fontWeight: 500 }}
+          <span style={{ color: '#1565FF', cursor: 'pointer', fontWeight: 500 }}
             onClick={() => window.api?.shell?.openExternal('mailto:support@mailflow.io')}>
             Contact us
           </span>

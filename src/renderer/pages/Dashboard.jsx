@@ -55,7 +55,19 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData()
+    autoLoadInstance()
   }, [])
+
+  async function autoLoadInstance() {
+    try {
+      const result = await window.api.license.getInstance()
+      if (result && result.success && result.ip) {
+        setInstanceInfo(result)
+      }
+    } catch (err) {
+      console.log('[Dashboard] No instance assigned yet:', err.message)
+    }
+  }
 
   async function loadData() {
     setLoading('dashboard', true)
