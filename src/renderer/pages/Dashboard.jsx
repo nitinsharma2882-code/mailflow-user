@@ -33,18 +33,32 @@ export default function Dashboard() {
   const handleReleaseInstance = useCallback(async () => {
     const confirmed = confirm(
       'Release your current instance?\n\n' +
-      '• Your current IP will be terminated\n' +
-      '• A fresh instance will be auto-created\n' +
-      '• You will get a new IP when ready\n\n' +
-      'This may take 5-10 minutes.'
+      '• If pool has available instances — you get one immediately\n' +
+      '• If pool is empty — new instance created (5-10 minutes)\n\n' +
+      'Continue?'
     )
     if (!confirmed) return
     setLoadingInstance(true)
     try {
       const result = await window.api.license.releaseInstance()
       if (result && result.success) {
-        setInstanceInfo(null)
-        addToast('✅ Instance releasing — a fresh one will be auto-created shortly', 'success')
+        if (result.newIp) {
+          setInstanceInfo({
+            success:    true,
+            ip:         result.newIp,
+            status:     'assigned',
+            assignedAt: new Date().toISOString(),
+            agentToken: result.agentToken || 'mailflow-agent-2026',
+            agentPort:  result.agentPort  || 3000,
+          })
+          addToast('✅ New server assigned from pool: ' + result.newIp, 'success')
+        } else if (result.rebuilding) {
+          setInstanceInfo(null)
+          addToast('⏳ Instance released. New one being created — click Refresh Server in 5-10 minutes', 'success')
+        } else {
+          setInstanceInfo(null)
+          addToast('✅ ' + (result.message || 'Instance released'), 'success')
+        }
       } else {
         addToast('❌ ' + (result?.error || 'Release failed'), 'error')
       }

@@ -430,12 +430,22 @@ function registerLicenseHandlers() {
       const licenseKey = global._mailflowLicenseKey || ''
       if (!licenseKey) return { success: false, error: 'No license key' }
 
-      const res = await httpRequest(LICENSE_SERVER + '/api/user/instance/release', 'POST', { licenseKey })
+      const res  = await httpRequest(LICENSE_SERVER + '/api/user/instance/release', 'POST', { licenseKey })
       const data = res.json()
+
       if (data.success) {
-        global._mailflowAssignedInstance = null
+        if (data.newIp) {
+          global._mailflowAssignedInstance = {
+            ip:         data.newIp,
+            agentToken: data.agentToken || 'mailflow-agent-2026',
+            agentPort:  data.agentPort  || 3000,
+          }
+          console.log('[Release] Auto-assigned from pool:', data.newIp)
+        } else {
+          global._mailflowAssignedInstance = null
+          console.log('[Release] No pool instance, cleared assignment')
+        }
         fireLog('/api/log/activity', { event: 'instance_released', details: 'Instance released', hardware_id: getHardwareId() })
-        console.log('[releaseInstance] Instance released')
       }
       return data
     } catch (err) {
