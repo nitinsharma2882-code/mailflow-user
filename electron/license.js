@@ -276,10 +276,10 @@ async function checkLicense() {
       global._mailflowLicenseKey = local.key
       saveLicense(Object.assign({}, local, result.license, { lastVerified: new Date().toISOString() }))
       startSessionCheck()
-      // Auto-fetch assigned instance so campaigns route through agent without needing Dashboard click
+      // Restore existing instance assignment on startup (does NOT auto-assign a new one)
       ;(async () => {
         try {
-          const inst = await httpPost('/api/user/instance', { licenseKey: local.key })
+          const inst = await httpPost('/api/user/instance/current', { licenseKey: local.key })
           if (inst.success && inst.ip) {
             global._mailflowAssignedInstance = {
               ip:         inst.ip,
@@ -288,12 +288,12 @@ async function checkLicense() {
               agentPort:  inst.agentPort  || 3000,
               assignedAt: inst.assignedAt,
             }
-            console.log('[License] Auto-fetched instance on startup:', inst.ip)
+            console.log('[License] Restored existing instance on startup:', inst.ip)
           } else {
-            console.log('[License] No instance assigned yet:', inst.error || 'none in pool')
+            console.log('[License] No existing instance to restore:', inst.error || 'none assigned')
           }
         } catch (err) {
-          console.log('[License] Auto-fetch instance failed (non-critical):', err.message)
+          console.log('[License] Instance restore on startup failed (non-critical):', err.message)
         }
       })()
       return { valid: true, license: result.license }
