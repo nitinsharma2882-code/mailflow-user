@@ -4,10 +4,12 @@ import Button from '../components/ui/Button'
 
 const MAX_PAGES = 4
 
-function InstanceSelector({ value, onChange, instances, onRefresh }) {
-  const myInstances        = instances.filter(function(i) { return i.is_mine && !i.purpose })
-  const availableInstances = instances.filter(function(i) { return !i.is_mine && i.status === 'ready' })
+function InstanceSelector({ value, onChange, instances, onRefresh, selectedIps }) {
+  const otherSelected      = (selectedIps || []).filter(function(ip) { return ip && ip !== value })
+  const myInstances        = instances.filter(function(i) { return i.is_mine && !i.purpose && !otherSelected.includes(i.ip_address) })
+  const availableInstances = instances.filter(function(i) { return !i.is_mine && i.status === 'ready' && !otherSelected.includes(i.ip_address) })
   const inUseInstances     = instances.filter(function(i) { return i.purpose && i.usage_status === 'active' })
+  const usedByOther        = instances.filter(function(i) { return otherSelected.includes(i.ip_address) && i.ip_address !== value })
 
   return (
     <div>
@@ -47,6 +49,18 @@ function InstanceSelector({ value, onChange, instances, onRefresh }) {
               return (
                 <option key={i.id} value={i.ip_address} disabled>
                   ✕ {i.ip_address} (Page {i.page_number})
+                </option>
+              )
+            })}
+          </optgroup>
+        )}
+
+        {usedByOther.length > 0 && (
+          <optgroup label="── Selected by Another Tab ──">
+            {usedByOther.map(function(i) {
+              return (
+                <option key={'other-' + i.id} value={i.ip_address} disabled>
+                  ✕ {i.ip_address} (used by another page)
                 </option>
               )
             })}
@@ -469,6 +483,7 @@ export default function MultiCampaign() {
                     instances={instances}
                     pageId={page.id}
                     onRefresh={loadInstances}
+                    selectedIps={pages.filter(function(p) { return p.id !== page.id }).map(function(p) { return p.instanceIp }).filter(Boolean)}
                   />
                 )}
               </div>
