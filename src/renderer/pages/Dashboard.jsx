@@ -73,8 +73,19 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData()
-    autoLoadInstance()
     loadPlan()
+  }, [])
+
+  useEffect(function() {
+    autoLoadInstance()
+    var interval = setInterval(function() {
+      window.api.license.getInstance().then(function(result) {
+        if (result && result.success && result.ip) {
+          setInstanceInfo(result)
+        }
+      }).catch(function() {})
+    }, 30000)
+    return function() { clearInterval(interval) }
   }, [])
 
   useEffect(function() {
@@ -226,6 +237,22 @@ export default function Dashboard() {
                     Since {new Date(instanceInfo.assignedAt).toLocaleDateString()}
                   </span>
                 )}
+                <button
+                  onClick={function() {
+                    navigator.clipboard.writeText(instanceInfo.ip)
+                    addToast('✅ IP copied to clipboard', 'success')
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    background: 'transparent',
+                    border: '1px solid var(--bdr)',
+                    borderRadius: 4,
+                    color: 'var(--txt3)',
+                    fontSize: 10,
+                    cursor: 'pointer',
+                  }}>
+                  Copy
+                </button>
               </div>
             ) : (
               <div style={{ fontSize: 12, color: 'var(--txt3)' }}>

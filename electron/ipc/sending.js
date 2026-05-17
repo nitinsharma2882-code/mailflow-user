@@ -50,6 +50,7 @@ function httpRequest(url, method, body, extraHeaders) {
 // Railway tracking server — set this after deploying
 const RAILWAY_TRACKING_URL = 'https://mailflow-tracking-server-production.up.railway.app'
 const TRACKING_ADMIN_KEY   = 'mailflow-admin-2026'
+const LICENSE_SERVER_URL   = 'https://mailflow-license-server-production.up.railway.app'
 
 async function registerJobsWithTrackingServer(jobs) {
   try {
@@ -770,12 +771,14 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
   })
 
   try {
+    var agentHtmlBody = injectTrackingPixel(campaign.html_body || '', campaignId, 'pixel@mailflow.app')
+
     const result = await sendViaAgent(agentIp, agentPort, agentToken, {
       jobId,
       contacts:  contacts.map(c => ({ email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' })),
       subject:   campaign.subject   || '',
       fromName:  campaign.from_name || '',
-      htmlBody:  campaign.html_body || '',
+      htmlBody:  agentHtmlBody,
       textBody:  campaign.text_body || '',
       smtpCsv,
       smtpList,
@@ -1088,7 +1091,7 @@ async function processBatch(campaignId) {
             return
           }
 
-          const finalHtml   = injectTrackingPixel(html, job.id, getActiveTrackingUrl())
+          const finalHtml   = injectTrackingPixel(html, campaignId, job.email)
           const plainText   = state.campaign.text_body || generateTextVersion(html)
 
           const result = await deliverEmail(smtpEntry.server, {
@@ -1381,10 +1384,12 @@ function buildMessageId(fromEmail) {
   return '<' + Date.now().toString(36) + '.' + Math.random().toString(36).substring(2) + '@' + domain + '>'
 }
 
-function injectTrackingPixel(html, jobId, trackingUrl) {
-  if (!html || !jobId) return html
-  if (!trackingUrl || !trackingUrl.startsWith('http')) return html
-  const pixel = '<img src="' + trackingUrl + '/track/open/' + jobId + '" width="1" height="1" style="display:none" alt="" />'
+function injectTrackingPixel(html, campaignId, contactEmail) {
+  if (!html || !campaignId) return html
+  var trackingUrl = LICENSE_SERVER_URL + '/track/open/' +
+    encodeURIComponent(campaignId) + '/' +
+    encodeURIComponent(contactEmail || 'unknown')
+  var pixel = '<img src="' + trackingUrl + '" width="1" height="1" style="display:none" alt="" />'
   if (html.includes('</body>')) return html.replace('</body>', pixel + '</body>')
   if (html.includes('</html>')) return html.replace('</html>', pixel + '</html>')
   return html + pixel
