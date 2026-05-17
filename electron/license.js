@@ -350,7 +350,39 @@ async function activateLicense(licenseKey) {
     })
 
     if (result.success) {
-      const cleanKey = licenseKey.trim().toUpperCase()
+      const cleanKey   = licenseKey.trim().toUpperCase()
+      const prevLicense = loadLicense()
+      const prevKey     = prevLicense && prevLicense.key ? prevLicense.key.trim().toUpperCase() : null
+      const isSwitched  = prevKey && prevKey !== cleanKey
+
+      if (isSwitched) {
+        // Different user — clear their local DB tables so no data bleeds across
+        try {
+          const { get: getDb } = require('../database/db')
+          const db = getDb()
+          if (db) {
+            db.prepare('DELETE FROM campaigns').run()
+            db.prepare('DELETE FROM contacts').run()
+            db.prepare('DELETE FROM contact_lists').run()
+            db.prepare('DELETE FROM templates').run()
+            db.prepare('DELETE FROM email_jobs').run()
+            db.prepare('DELETE FROM servers').run()
+            console.log('[License] Cleared local DB for license switch:', prevKey, '->', cleanKey)
+          }
+        } catch (dbErr) {
+          console.log('[License] DB clear on switch failed (non-critical):', dbErr.message)
+        }
+
+        // Clear any cached instance belonging to the previous user
+        if (global._mailflowInstanceMap) global._mailflowInstanceMap.clear()
+        global._mailflowAssignedInstance = null
+
+        // Notify renderer to reset its in-memory state
+        BrowserWindow.getAllWindows().forEach(function(w) {
+          try { w.webContents.send('license:switched', { prevKey, newKey: cleanKey }) } catch {}
+        })
+      }
+
       global._mailflowLicenseKey = cleanKey
       saveLicense(Object.assign({
         key: cleanKey,

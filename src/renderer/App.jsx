@@ -118,6 +118,11 @@ export default function App() {
       window.api.on('license:expiringSoon', ({ daysRemaining }) => {
         setExpiringSoonMsg(`⚠️ Your license expires in ${daysRemaining} day(s). Renew soon to avoid interruption.`)
       })
+
+      // Different user activated — clear all local data so previous user's data isn't visible
+      window.api.on('license:switched', () => {
+        useAppStore.getState().resetStore()
+      })
     }
   }, [])
 

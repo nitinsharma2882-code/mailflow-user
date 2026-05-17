@@ -18,6 +18,7 @@ const validChannels = [
   'multicampaign:progress',
   'multicampaign:complete',
   'instance:changed',
+  'license:switched',
 ]
 
 // Expose safe IPC API to renderer

@@ -60,4 +60,18 @@ export const useAppStore = create((set, get) => ({
   addTestCampaignToHistory: (entry) => set(s => ({
     testCampaignHistory: [entry, ...s.testCampaignHistory].slice(0, 10)
   })),
+
+  // Reset all user-specific data on license switch
+  resetStore: () => set({
+    campaigns:           [],
+    contactLists:        [],
+    servers:             [],
+    templates:           [],
+    analytics:           null,
+    toasts:              [],
+    campaignProgress:    {},
+    resendCampaign:      null,
+    testCampaignHistory: [],
+    activePage:          'dashboard',
+  }),
 }))
