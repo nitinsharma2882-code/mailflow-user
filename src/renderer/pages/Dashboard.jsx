@@ -75,14 +75,30 @@ export default function Dashboard() {
     loadPlan()
   }, [])
 
+  useEffect(function() {
+    function handleInstanceChanged(data) {
+      if (data && data.ip) {
+        setInstanceInfo(function(prev) { return Object.assign({}, prev, { ip: data.ip, status: 'assigned' }) })
+      } else {
+        setInstanceInfo(null)
+      }
+    }
+    window.api.on('instance:changed', handleInstanceChanged)
+    return function() { window.api.off('instance:changed', handleInstanceChanged) }
+  }, [])
+
   async function autoLoadInstance() {
     try {
       const result = await window.api.license.getInstance()
       if (result && result.success && result.ip) {
         setInstanceInfo(result)
+        console.log('[Dashboard] Instance loaded:', result.ip)
+      } else {
+        setInstanceInfo(null)
       }
     } catch (err) {
-      console.log('[Dashboard] No instance assigned yet:', err.message)
+      console.log('[Dashboard] No instance:', err.message)
+      setInstanceInfo(null)
     }
   }
 

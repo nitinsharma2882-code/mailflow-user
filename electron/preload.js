@@ -17,6 +17,7 @@ const validChannels = [
   'tracking:open',
   'multicampaign:progress',
   'multicampaign:complete',
+  'instance:changed',
 ]
 
 // Expose safe IPC API to renderer

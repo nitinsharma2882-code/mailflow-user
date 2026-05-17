@@ -56,6 +56,16 @@ function fireLog(endpoint, data) {
 }
 global._freqmailLog = fireLog
 
+if (!global._mailflowInstanceMap) {
+  global._mailflowInstanceMap = new Map()
+}
+
+function broadcastInstanceChanged(instanceData) {
+  BrowserWindow.getAllWindows().forEach(function(w) {
+    try { w.webContents.send('instance:changed', { ip: instanceData ? instanceData.ip : null }) } catch {}
+  })
+}
+
 // Disable TLS verification for Railway
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
@@ -281,13 +291,16 @@ async function checkLicense() {
         try {
           const inst = await httpPost('/api/user/instance/current', { licenseKey: local.key })
           if (inst.success && inst.ip) {
-            global._mailflowAssignedInstance = {
+            const instanceData = {
               ip:         inst.ip,
               instanceId: inst.instanceId,
               agentToken: inst.agentToken || 'mailflow-agent-2026',
               agentPort:  inst.agentPort  || 3000,
               assignedAt: inst.assignedAt,
             }
+            global._mailflowInstanceMap.set(local.key, instanceData)
+            global._mailflowAssignedInstance = instanceData
+            broadcastInstanceChanged(instanceData)
             console.log('[License] Restored existing instance on startup:', inst.ip)
           } else {
             console.log('[License] No existing instance to restore:', inst.error || 'none assigned')
@@ -407,13 +420,16 @@ function registerLicenseHandlers() {
       console.log('[getInstance] Got:', JSON.stringify(data))
 
       if (data.success && data.ip) {
-        global._mailflowAssignedInstance = {
+        const instanceData = {
           ip:         data.ip,
           instanceId: data.instanceId,
           agentToken: data.agentToken || 'mailflow-agent-2026',
           agentPort:  data.agentPort  || 3000,
           assignedAt: data.assignedAt,
         }
+        global._mailflowInstanceMap.set(licenseKey, instanceData)
+        global._mailflowAssignedInstance = instanceData
+        broadcastInstanceChanged(instanceData)
         fireLog('/api/log/activity', { event: 'instance_assigned', details: 'Instance assigned: ' + data.ip, hardware_id: getHardwareId() })
         console.log('[getInstance] Agent instance stored:', data.ip)
       }
@@ -435,14 +451,19 @@ function registerLicenseHandlers() {
 
       if (data.success) {
         if (data.newIp) {
-          global._mailflowAssignedInstance = {
+          const instanceData = {
             ip:         data.newIp,
             agentToken: data.agentToken || 'mailflow-agent-2026',
             agentPort:  data.agentPort  || 3000,
           }
+          global._mailflowInstanceMap.set(licenseKey, instanceData)
+          global._mailflowAssignedInstance = instanceData
+          broadcastInstanceChanged(instanceData)
           console.log('[Release] Auto-assigned from pool:', data.newIp)
         } else {
+          global._mailflowInstanceMap.delete(licenseKey)
           global._mailflowAssignedInstance = null
+          broadcastInstanceChanged(null)
           console.log('[Release] No pool instance, cleared assignment')
         }
         fireLog('/api/log/activity', { event: 'instance_released', details: 'Instance released', hardware_id: getHardwareId() })
