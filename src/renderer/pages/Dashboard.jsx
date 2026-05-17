@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { StatCard, SectionHeader, Table, Card, GaugeRow, Badge, ProgressBar, Spinner } from '../components/ui/UI'
 import Button from '../components/ui/Button'
@@ -10,25 +10,30 @@ export default function Dashboard() {
   const [instanceInfo, setInstanceInfo]         = useState(null)
   const [loadingInstance, setLoadingInstance]   = useState(false)
   const [planInfo, setPlanInfo]                 = useState(null)
+  const refreshingRef = useRef(false)
 
   const handleRefreshInstance = useCallback(async () => {
+    if (refreshingRef.current) {
+      addToast('⏳ Refresh already in progress. Please wait.', 'error')
+      return
+    }
+    refreshingRef.current = true
     setLoadingInstance(true)
     try {
       const result = await window.api.license.getInstance()
       if (result && result.success && result.ip) {
         setInstanceInfo(result)
-        addToast('✅ Server assigned — IP: ' + result.ip, 'success')
+        addToast('✅ Server assigned: ' + result.ip, 'success')
       } else if (result && result.limitReached) {
-        addToast('⚠️ Instance limit reached. Your plan allows ' + result.max_instances + ' instance(s). Contact admin to upgrade.', 'error')
-      } else if (result && result.error) {
-        addToast('⚠ ' + result.error, 'error')
+        addToast('⚠️ Instance limit reached. Contact admin to upgrade.', 'error')
       } else {
-        addToast('No server assigned yet. Contact admin to add instances to pool.', 'error')
+        addToast('❌ ' + (result?.error || 'No instances available'), 'error')
       }
     } catch (err) {
-      addToast('Failed to fetch server: ' + err.message, 'error')
+      addToast('❌ Error: ' + err.message, 'error')
     } finally {
       setLoadingInstance(false)
+      setTimeout(function() { refreshingRef.current = false }, 3000)
     }
   }, [addToast])
 
@@ -262,7 +267,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button onClick={handleRefreshInstance} loading={loadingInstance} variant="primary" size="sm">
+          <Button onClick={handleRefreshInstance} loading={loadingInstance} disabled={loadingInstance} variant="primary" size="sm">
             🔄 Refresh Server
           </Button>
           <Button onClick={handleReleaseInstance} variant="ghost-danger" size="sm" loading={loadingInstance}>
