@@ -18,6 +18,8 @@ export default function Dashboard() {
       if (result && result.success && result.ip) {
         setInstanceInfo(result)
         addToast('✅ Server assigned — IP: ' + result.ip, 'success')
+      } else if (result && result.limitReached) {
+        addToast('⚠️ Instance limit reached. Your plan allows ' + result.max_instances + ' instance(s). Contact admin to upgrade.', 'error')
       } else if (result && result.error) {
         addToast('⚠ ' + result.error, 'error')
       } else {
@@ -279,6 +281,23 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Instance limit warning */}
+      {planInfo && planInfo.usedInstances >= planInfo.max_instances && (
+        <div style={{
+          background: 'rgba(239,68,68,0.1)',
+          border: '1px solid #EF4444',
+          borderRadius: 'var(--rad)',
+          padding: '10px 16px',
+          marginBottom: 12,
+          fontSize: 12,
+          color: '#EF4444',
+          fontWeight: 500,
+        }}>
+          ⚠️ You have used all {planInfo.max_instances} instance(s) on your {planInfo.label} plan.
+          Contact admin to upgrade your plan.
         </div>
       )}
 
