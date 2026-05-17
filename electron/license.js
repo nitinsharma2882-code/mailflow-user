@@ -527,7 +527,15 @@ function registerLicenseHandlers() {
       if (!licenseKey) return { success: false, error: 'No license key' }
       const res = await httpRequest(LICENSE_SERVER + '/api/user/plan', 'POST', { licenseKey })
       if (!res.ok) return { success: false, error: 'Server error' }
-      return res.json()
+      const data = await res.json()
+      if (data.success && data.plan) {
+        const correctLimits = { basic: 5, standard: 10, premium: 20 }
+        const correct = correctLimits[data.plan]
+        if (correct && (!data.max_instances || data.max_instances < correct)) {
+          data.max_instances = correct
+        }
+      }
+      return data
     } catch (e) {
       return { success: false, error: e.message }
     }

@@ -1,7 +1,16 @@
 import React from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import styles from './Sidebar.module.css'
-import freqmailLogo from '../../assets/freqmail-logo.svg'
+
+const FreqMailLogo = function() {
+  return (
+    <svg viewBox="0 0 220 48" xmlns="http://www.w3.org/2000/svg" style={{width:'150px', height:'40px', display:'block'}}>
+      <text x="4" y="38" fontFamily="DM Sans, Arial, system-ui" fontSize="38" fontWeight="800" letterSpacing="-1">
+        <tspan fill="#FFFFFF">Freq</tspan><tspan fill="#1565FF">Mail</tspan>
+      </text>
+    </svg>
+  )
+}
 
 const NAV = [
   {
@@ -35,18 +44,8 @@ export default function Sidebar() {
         borderBottom: '1px solid rgba(255,255,255,0.08)',
         marginBottom: 8,
       }}>
-        <img
-          src={freqmailLogo}
-          alt="FreqMail"
-          style={{
-            width: '100%', maxWidth: 152, height: 'auto',
-            objectFit: 'contain', display: 'block', marginBottom: 4,
-          }}
-        />
-        <div style={{
-          fontSize: 10, color: 'rgba(255,255,255,0.4)',
-          letterSpacing: '0.5px', textTransform: 'uppercase',
-        }}>
+        <FreqMailLogo />
+        <div style={{fontSize:10, color:'rgba(255,255,255,0.35)', letterSpacing:'1px', textTransform:'uppercase', marginTop:2}}>
           Send Smart. Stay Ahead.
         </div>
       </div>
