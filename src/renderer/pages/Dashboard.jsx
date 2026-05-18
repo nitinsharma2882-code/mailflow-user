@@ -25,7 +25,12 @@ export default function Dashboard() {
         setInstanceInfo(result)
         addToast('✅ Server assigned: ' + result.ip, 'success')
       } else if (result && result.limitReached) {
-        addToast('⚠️ Instance limit reached. Contact admin to upgrade.', 'error')
+        addToast(
+          '⚠️ Instance limit reached (' + (result.currentCount || '') + '/' + (result.maxAllowed || 5) + '). ' +
+          'You have ' + (result.currentCount || 0) + ' active/quarantined instances. ' +
+          'Contact admin to restore quarantined instances or upgrade your plan.',
+          'error'
+        )
       } else {
         addToast('❌ ' + (result?.error || 'No instances available'), 'error')
       }

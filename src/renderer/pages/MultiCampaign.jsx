@@ -88,15 +88,17 @@ function InstanceSelector({ value, onChange, instances, onRefresh, selectedIps }
 export default function MultiCampaign() {
   const { resendCampaign, clearResendCampaign, setActivePage, addToast } = useAppStore()
 
-  const [template, setTemplate]   = useState({ subject: '', fromName: '', html_body: '' })
-  const [instances, setInstances] = useState([])
-  const [pages, setPages]         = useState([
+  const [template, setTemplate]       = useState({ subject: '', fromName: '', html_body: '' })
+  const [instances, setInstances]     = useState([])
+  const [pages, setPages]             = useState([
     { id: 1, contactListId: '', contacts: 0, smtpAccounts: [], instanceIp: '', status: 'idle', sent: 0, failed: 0, total: 0, pageKey: null }
   ])
-  const [activeTab, setActiveTab] = useState(1)
-  const [launching, setLaunching] = useState(false)
-  const [campaignId]              = useState('multi-' + Date.now())
-  const listenersAttached         = useRef(false)
+  const [activeTab, setActiveTab]     = useState(1)
+  const [launching, setLaunching]     = useState(false)
+  const [campaignId]                  = useState('multi-' + Date.now())
+  const [slots, setSlots]             = useState(null)
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const listenersAttached             = useRef(false)
 
   const handleProgress = useCallback(function(data) {
     setPages(function(prev) {
@@ -135,6 +137,25 @@ export default function MultiCampaign() {
     })
   }, [campaignId])
 
+  async function loadSlots() {
+    setSlotsLoading(true)
+    try {
+      var result = await window.api.license.getSlots()
+      if (result && result.success) {
+        setSlots(result)
+      }
+    } catch (err) {
+      console.log('[MultiCampaign] Slots error:', err.message)
+    } finally {
+      setSlotsLoading(false)
+    }
+  }
+
+  function canAddPage() {
+    if (!slots) return true
+    return (pages.length + 1) <= slots.maxAllowed
+  }
+
   useEffect(function() {
     if (resendCampaign) {
       setTemplate({
@@ -145,6 +166,7 @@ export default function MultiCampaign() {
       clearResendCampaign()
     }
     loadInstances()
+    loadSlots()
 
     if (!listenersAttached.current) {
       listenersAttached.current = true
@@ -184,6 +206,14 @@ export default function MultiCampaign() {
 
   function addPage() {
     if (pages.length >= MAX_PAGES) { addToast('Maximum 4 pages allowed', 'error'); return }
+    if (!canAddPage()) {
+      addToast(
+        'Instance limit reached. Your ' + (slots ? slots.planLabel : '') + ' plan allows ' +
+        (slots ? slots.maxAllowed : 5) + ' instances total. You cannot add more pages.',
+        'error'
+      )
+      return
+    }
     setPages(function(prev) {
       return prev.concat([{
         id:            prev.length + 1,
@@ -333,7 +363,14 @@ export default function MultiCampaign() {
         <div style={{display:'flex', gap:8, alignItems:'center'}}>
           <Button variant="ghost" size="sm" onClick={function() { setActivePage('campaigns') }}>← Back</Button>
           {!anyRunning && pages.length < MAX_PAGES && (
-            <Button variant="ghost" size="sm" onClick={addPage}>+ Add Page</Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={addPage}
+              disabled={slots && !canAddPage()}
+              style={{ opacity: (slots && !canAddPage()) ? 0.5 : 1, cursor: (slots && !canAddPage()) ? 'not-allowed' : 'pointer' }}>
+              + Add Page
+            </Button>
           )}
           {!anyRunning && !allCompleted && (
             <Button variant="primary" loading={launching} onClick={handleLaunchAll} disabled={!canLaunch()}>
@@ -377,6 +414,27 @@ export default function MultiCampaign() {
             style={Object.assign({}, IS, { resize:'vertical', fontFamily:'monospace', fontSize:12 })} disabled={anyRunning} />
         </div>
       </div>
+
+      {/* Slots banner */}
+      {slots && (
+        <div style={{
+          padding: '8px 14px',
+          background: slots.remaining === 0 ? 'rgba(239,68,68,0.1)' : 'rgba(21,101,255,0.08)',
+          border: '1px solid ' + (slots.remaining === 0 ? '#EF4444' : 'rgba(21,101,255,0.25)'),
+          borderRadius: 8,
+          fontSize: 12,
+          color: slots.remaining === 0 ? '#EF4444' : '#60a5fa',
+          marginBottom: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          {slots.remaining === 0
+            ? '⚠️ Instance limit reached. You have used all ' + slots.maxAllowed + ' instance slots on your ' + slots.planLabel + ' plan.'
+            : '📊 Instance slots: ' + slots.totalUsed + ' used / ' + slots.maxAllowed + ' total · ' + slots.remaining + ' remaining'
+          }
+        </div>
+      )}
 
       {/* Page tabs */}
       <div style={{display:'flex', gap:8, marginBottom:16, flexWrap:'wrap', alignItems:'center'}}>
@@ -479,7 +537,34 @@ export default function MultiCampaign() {
                 ) : (
                   <InstanceSelector
                     value={page.instanceIp}
-                    onChange={function(ip) { updatePage(page.id, { instanceIp: ip }) }}
+                    onChange={function(ip) {
+                      // Prevent selecting an IP already used by another page
+                      var usedByOtherPage = pages.filter(function(p) {
+                        return p.id !== page.id && p.instanceIp === ip
+                      }).length > 0
+                      if (usedByOtherPage) {
+                        addToast('This instance is already selected by another page. Each page must use a different instance.', 'error')
+                        return
+                      }
+
+                      // Check slot limit for a genuinely new IP selection
+                      var prevIp    = page.instanceIp
+                      var isNewIp   = ip && ip !== prevIp
+                      var hadIp     = !!prevIp
+                      if (isNewIp && !hadIp && slots) {
+                        var wouldUse = slots.totalUsed + 1
+                        if (wouldUse > slots.maxAllowed) {
+                          addToast(
+                            'Cannot select this instance. Plan limit of ' + slots.maxAllowed + ' reached (' + slots.planLabel + ').',
+                            'error'
+                          )
+                          return
+                        }
+                      }
+
+                      updatePage(page.id, { instanceIp: ip })
+                      loadSlots()
+                    }}
                     instances={instances}
                     pageId={page.id}
                     onRefresh={loadInstances}

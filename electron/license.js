@@ -589,6 +589,18 @@ function registerLicenseHandlers() {
       return { success: false, error: err.message }
     }
   })
+
+  ipcMain.handle('license:getSlots', async function() {
+    try {
+      const licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey) return { success: false, remaining: 0, totalUsed: 0, maxAllowed: 0 }
+      const res  = await httpRequest(LICENSE_SERVER + '/api/user/instance/slots', 'POST', { licenseKey })
+      const data = await res.json()
+      return data
+    } catch (err) {
+      return { success: false, error: err.message, remaining: 0 }
+    }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }
