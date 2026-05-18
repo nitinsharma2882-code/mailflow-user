@@ -729,10 +729,27 @@ export function VerifyEmails() {
   async function handleSingle() {
     if (!single) { addToast('Enter an email address', 'error'); return }
     setLoading(true)
-    const r = await window.api.verify.verifySingle(single)
-    setResults([r])
-    setSummary({ total:1, valid: r.status==='valid'?1:0, risky: r.status==='risky'?1:0, invalid: r.status==='invalid'?1:0 })
-    setLoading(false)
+    try {
+      const result = await window.api.email.verify([single.trim().toLowerCase()])
+      if (result.success && result.results && result.results.length > 0) {
+        const r      = result.results[0]
+        const mapped = {
+          email:  r.email,
+          status: r.valid ? 'valid' : (r.suggestion ? 'risky' : 'invalid'),
+          reason: r.reason || '',
+          mx:     r.mxChecked ? 'checked' : '',
+        }
+        setResults([mapped])
+        setSummary({ total: 1, valid: r.valid ? 1 : 0, risky: r.suggestion ? 1 : 0, invalid: r.valid ? 0 : (r.suggestion ? 0 : 1) })
+        if (r.suggestion) addToast('Did you mean: ' + r.suggestion + '?', 'info')
+      } else {
+        addToast('Verification failed: ' + (result.error || 'Unknown error'), 'error')
+      }
+    } catch (err) {
+      addToast('Error: ' + err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleExport(type) {

@@ -88,6 +88,11 @@ contextBridge.exposeInMainWorld('api', {
     exportResults: (results, type)      => ipcRenderer.invoke('verify:export', results, type),
   },
 
+  // Email utilities
+  email: {
+    verify: (emails) => ipcRenderer.invoke('email:verify', emails),
+  },
+
   // SMTP testing
   smtp: {
     testSingle:    (config)        => ipcRenderer.invoke('smtp:testSingle', config),

