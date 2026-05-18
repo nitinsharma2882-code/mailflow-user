@@ -54,7 +54,10 @@ export default function Dashboard() {
     try {
       const result = await window.api.license.releaseInstance()
       if (result && result.success) {
-        if (result.newIp) {
+        if (result.atLimit) {
+          setInstanceInfo(null)
+          addToast('✅ Instance released to quarantine. You are at your plan limit. Contact admin to restore slots.', 'success')
+        } else if (result.newIp) {
           setInstanceInfo({
             success:    true,
             ip:         result.newIp,
