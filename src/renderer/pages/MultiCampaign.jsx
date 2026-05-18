@@ -4,7 +4,7 @@ import Button from '../components/ui/Button'
 
 const MAX_PAGES = 4
 
-function InstanceSelector({ value, onChange, instances, onRefresh, selectedIps }) {
+function InstanceSelector({ value, onChange, instances, onRefresh, selectedIps, slotsRemaining }) {
   const otherSelected      = (selectedIps || []).filter(function(ip) { return ip && ip !== value })
   const myInstances        = instances.filter(function(i) { return i.is_mine && !i.purpose && !otherSelected.includes(i.ip_address) })
   const availableInstances = instances.filter(function(i) { return !i.is_mine && i.status === 'ready' && !otherSelected.includes(i.ip_address) })
@@ -81,6 +81,14 @@ function InstanceSelector({ value, onChange, instances, onRefresh, selectedIps }
           <span style={{fontSize:11, color:'var(--gr)', fontWeight:600}}>● {value}</span>
         )}
       </div>
+      {slotsRemaining !== undefined && slotsRemaining !== null && (
+        <div style={{fontSize:10, color: slotsRemaining === 0 ? '#EF4444' : '#9898B0', marginTop:4}}>
+          {slotsRemaining === 0
+            ? '⚠️ No slots remaining'
+            : slotsRemaining + ' slot(s) remaining'
+          }
+        </div>
+      )}
     </div>
   )
 }
@@ -99,6 +107,15 @@ export default function MultiCampaign() {
   const [slots, setSlots]             = useState(null)
   const [slotsLoading, setSlotsLoading] = useState(false)
   const listenersAttached             = useRef(false)
+
+  // Real-time slot tracking — derived from local page state on every render
+  var selectedIps        = pages.map(function(p) { return p.instanceIp }).filter(function(ip) { return ip && ip !== '' })
+  var uniqueSelectedIps  = [...new Set(selectedIps)]
+  var serverBaseCount    = slots ? (slots.totalUsed    || 0) : 0
+  var serverAssignedIps  = slots ? (slots.assignedIps  || []) : []
+  var newLocalSelections = uniqueSelectedIps.filter(function(ip) { return !serverAssignedIps.includes(ip) }).length
+  var effectiveTotalUsed = serverBaseCount + newLocalSelections
+  var effectiveRemaining = slots ? Math.max(0, slots.maxAllowed - effectiveTotalUsed) : 99
 
   const handleProgress = useCallback(function(data) {
     setPages(function(prev) {
@@ -153,7 +170,7 @@ export default function MultiCampaign() {
 
   function canAddPage() {
     if (!slots) return true
-    return (pages.length + 1) <= slots.maxAllowed
+    return effectiveRemaining > 0
   }
 
   useEffect(function() {
@@ -366,9 +383,20 @@ export default function MultiCampaign() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={addPage}
-              disabled={slots && !canAddPage()}
-              style={{ opacity: (slots && !canAddPage()) ? 0.5 : 1, cursor: (slots && !canAddPage()) ? 'not-allowed' : 'pointer' }}>
+              onClick={function() {
+                if (slots && effectiveRemaining <= 0) {
+                  alert(
+                    '⚠️ Instance limit reached!\n\n' +
+                    'Your ' + slots.planLabel + ' plan allows ' + slots.maxAllowed + ' instances total.\n' +
+                    'You have used all ' + slots.maxAllowed + ' slots.\n\n' +
+                    'Release some instances or contact admin to upgrade your plan.'
+                  )
+                  return
+                }
+                addPage()
+              }}
+              disabled={slots && effectiveRemaining <= 0}
+              style={{ opacity: (slots && effectiveRemaining <= 0) ? 0.5 : 1, cursor: (slots && effectiveRemaining <= 0) ? 'not-allowed' : 'pointer' }}>
               + Add Page
             </Button>
           )}
@@ -419,19 +447,20 @@ export default function MultiCampaign() {
       {slots && (
         <div style={{
           padding: '8px 14px',
-          background: slots.remaining === 0 ? 'rgba(239,68,68,0.1)' : 'rgba(21,101,255,0.08)',
-          border: '1px solid ' + (slots.remaining === 0 ? '#EF4444' : 'rgba(21,101,255,0.25)'),
+          background: effectiveRemaining === 0 ? 'rgba(239,68,68,0.1)' : 'rgba(21,101,255,0.08)',
+          border: '1px solid ' + (effectiveRemaining === 0 ? '#EF4444' : 'rgba(21,101,255,0.25)'),
           borderRadius: 8,
           fontSize: 12,
-          color: slots.remaining === 0 ? '#EF4444' : '#60a5fa',
+          color: effectiveRemaining === 0 ? '#EF4444' : '#60a5fa',
           marginBottom: 12,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
+          fontWeight: 500,
         }}>
-          {slots.remaining === 0
-            ? '⚠️ Instance limit reached. You have used all ' + slots.maxAllowed + ' instance slots on your ' + slots.planLabel + ' plan.'
-            : '📊 Instance slots: ' + slots.totalUsed + ' used / ' + slots.maxAllowed + ' total · ' + slots.remaining + ' remaining'
+          {effectiveRemaining === 0
+            ? '⚠️ Instance limit reached. You have used all ' + slots.maxAllowed + ' slots on your ' + slots.planLabel + ' plan.'
+            : '📊 Instance slots: ' + effectiveTotalUsed + ' used / ' + slots.maxAllowed + ' total · ' + effectiveRemaining + ' remaining'
           }
         </div>
       )}
@@ -537,37 +566,54 @@ export default function MultiCampaign() {
                 ) : (
                   <InstanceSelector
                     value={page.instanceIp}
-                    onChange={function(ip) {
-                      // Prevent selecting an IP already used by another page
-                      var usedByOtherPage = pages.filter(function(p) {
-                        return p.id !== page.id && p.instanceIp === ip
-                      }).length > 0
-                      if (usedByOtherPage) {
-                        addToast('This instance is already selected by another page. Each page must use a different instance.', 'error')
+                    onChange={function(newIp) {
+                      var oldIp = page.instanceIp
+
+                      // Deselecting — always allow
+                      if (!newIp || newIp === '') {
+                        updatePage(page.id, { instanceIp: '' })
                         return
                       }
 
-                      // Check slot limit for a genuinely new IP selection
-                      var prevIp    = page.instanceIp
-                      var isNewIp   = ip && ip !== prevIp
-                      var hadIp     = !!prevIp
-                      if (isNewIp && !hadIp && slots) {
-                        var wouldUse = slots.totalUsed + 1
-                        if (wouldUse > slots.maxAllowed) {
-                          addToast(
-                            'Cannot select this instance. Plan limit of ' + slots.maxAllowed + ' reached (' + slots.planLabel + ').',
-                            'error'
-                          )
-                          return
-                        }
+                      // Same IP — no change
+                      if (newIp === oldIp) return
+
+                      // Block duplicate selection across pages
+                      var usedByOther = pages.filter(function(p) {
+                        return p.id !== page.id && p.instanceIp === newIp
+                      }).length > 0
+                      if (usedByOther) {
+                        alert('This instance is already selected by another page. Each page needs a different instance.')
+                        return
                       }
 
-                      updatePage(page.id, { instanceIp: ip })
-                      loadSlots()
+                      // INSTANT LOCAL VALIDATION — compute what the total would be after this selection
+                      var currentPageIps = pages.map(function(p) {
+                        return p.id === page.id ? newIp : p.instanceIp
+                      }).filter(function(ip) { return ip && ip !== '' })
+                      var uniqueNew = [...new Set(currentPageIps)]
+                      var newLocalSelections2 = uniqueNew.filter(function(ip) {
+                        return !serverAssignedIps.includes(ip)
+                      }).length
+                      var wouldBeTotal = serverBaseCount + newLocalSelections2
+
+                      if (slots && wouldBeTotal > slots.maxAllowed) {
+                        alert(
+                          '⚠️ Instance limit reached!\n\n' +
+                          'Your ' + slots.planLabel + ' plan allows ' + slots.maxAllowed + ' instances total.\n' +
+                          'You are currently using ' + effectiveTotalUsed + ' out of ' + slots.maxAllowed + '.\n\n' +
+                          'Release some instances or contact admin to upgrade your plan.'
+                        )
+                        return
+                      }
+
+                      // Valid — update immediately, no API call needed
+                      updatePage(page.id, { instanceIp: newIp })
                     }}
                     instances={instances}
                     pageId={page.id}
                     onRefresh={loadInstances}
+                    slotsRemaining={effectiveRemaining}
                     selectedIps={pages.filter(function(p) { return p.id !== page.id }).map(function(p) { return p.instanceIp }).filter(Boolean)}
                   />
                 )}
