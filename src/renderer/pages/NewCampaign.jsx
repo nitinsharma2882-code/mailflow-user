@@ -14,7 +14,7 @@ function NewCampaign() {
   const [step, setStep]           = useState(1)
   const [campaign, setCampaign]   = useState({
     name: '', contact_list_id: '', template_id: '',
-    server_ids: [], sending_mode: 'existing_server',
+    server_ids: [], sending_mode: 'custom_smtp',
     scheduled_at: '', custom_smtp_list: [],
     aws_access_key: '', aws_secret_key: '', aws_region: 'us-east-1', aws_sender_email: '',
   })
@@ -545,19 +545,62 @@ function NewCampaign() {
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Add SMTP / Server</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
-            {[
-              { value: 'existing_server', title: '🖥 Use Existing Server', desc: 'Use configured SMTP/API servers' },
-              { value: 'custom_smtp',     title: '📧 Upload SMTP CSV',     desc: 'Gmail, Outlook, iCloud via CSV' },
-              { value: 'aws_ses',         title: '☁️ AWS SES',             desc: 'Amazon Simple Email Service' },
-            ].map(m => (
-              <div key={m.value} onClick={() => setCampaign(c => ({ ...c, sending_mode: m.value }))}
-                style={{ padding: '16px', borderRadius: 'var(--rad-l)', cursor: 'pointer',
-                  border: campaign.sending_mode === m.value ? '2px solid var(--pu)' : '2px solid var(--bdr)',
-                  background: campaign.sending_mode === m.value ? 'var(--pu-l)' : 'var(--bg2)' }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{m.title}</div>
-                <div style={{ fontSize: 12, color: 'var(--txt2)' }}>{m.desc}</div>
+            {/* Use Existing Server — disabled (v2) */}
+            <div style={{
+              border: '1px solid #E0E0E0',
+              borderRadius: 10,
+              padding: '16px 20px',
+              opacity: 0.45,
+              cursor: 'not-allowed',
+              background: '#F8F8F8',
+              position: 'relative',
+            }}>
+              <div style={{
+                position: 'absolute', top: 8, right: 10,
+                background: '#E8E8E8', color: '#888',
+                fontSize: 9, fontWeight: 700,
+                padding: '2px 6px', borderRadius: 3,
+              }}>v2</div>
+              <div style={{fontWeight: 600, fontSize: 13, color: '#AAAAAA', marginBottom: 4}}>
+                🖥 Use Existing Server
               </div>
-            ))}
+              <div style={{fontSize: 11, color: '#BBBBBB'}}>
+                Use configured SMTP/API servers — Coming in Version 2
+              </div>
+            </div>
+
+            {/* Upload SMTP CSV — active */}
+            <div onClick={() => setCampaign(c => ({ ...c, sending_mode: 'custom_smtp' }))}
+              style={{ padding: '16px', borderRadius: 'var(--rad-l)', cursor: 'pointer',
+                border: campaign.sending_mode === 'custom_smtp' ? '2px solid var(--pu)' : '2px solid var(--bdr)',
+                background: campaign.sending_mode === 'custom_smtp' ? 'var(--pu-l)' : 'var(--bg2)' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>📧 Upload SMTP CSV</div>
+              <div style={{ fontSize: 12, color: 'var(--txt2)' }}>Gmail, Outlook, iCloud via CSV</div>
+            </div>
+
+            {/* AWS SES — disabled (v2) */}
+            <div style={{
+              border: '1px solid #E0E0E0',
+              borderRadius: 10,
+              padding: '16px 20px',
+              opacity: 0.45,
+              cursor: 'not-allowed',
+              background: '#F8F8F8',
+              position: 'relative',
+            }}>
+              <div style={{
+                position: 'absolute', top: 8, right: 10,
+                background: '#E8E8E8', color: '#888',
+                fontSize: 9, fontWeight: 700,
+                padding: '2px 6px', borderRadius: 3,
+              }}>v2</div>
+              <div style={{fontWeight: 600, fontSize: 13, color: '#AAAAAA', marginBottom: 4}}>
+                ☁️ AWS SES
+              </div>
+              <div style={{fontSize: 11, color: '#BBBBBB'}}>
+                Amazon Simple Email Service — Coming in Version 2
+              </div>
+            </div>
           </div>
 
           {campaign.sending_mode === 'existing_server' && (
@@ -814,8 +857,8 @@ function NewCampaign() {
                   ? `AWS SES (${campaign.aws_region || 'us-east-1'})`
                   : `${campaign.server_ids.length} server(s)`],
                 ['Schedule',        campaign.scheduled_at || 'Start immediately'],
-                ['Open Tracking',   '✅ Enabled'],
-                ['Click Tracking',  '✅ Enabled'],
+                ['Open Tracking',   'Coming in v2'],
+                ['Click Tracking',  'Coming in v2'],
               ].map(([k, v]) => (
                 <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bdr)' }}>
                   <span style={{ color: 'var(--txt2)' }}>{k}</span>

@@ -843,6 +843,7 @@ export function SmtpTester() {
   const [progress, setProgress]         = useState({ completed: 0, total: 0 })
   const [filterStatus, setFilterStatus] = useState('all')
   const [filePath, setFilePath]         = useState('')
+  const [downloading, setDownloading]   = useState(null)
 
   const IS = {
     width: '100%', padding: '8px 11px', border: '1px solid var(--bdr2)',
@@ -951,6 +952,42 @@ export function SmtpTester() {
     } catch (err) {
       addToast('Export error: ' + err.message, 'error')
     }
+  }
+
+  function downloadSmtpCsv(filter, filename) {
+    setDownloading(filter)
+    try {
+      var allResults = results || []
+      var filtered = filter === 'all'     ? allResults :
+                     filter === 'working' ? allResults.filter(function(a) { return a.status === 'working' }) :
+                     filter === 'failed'  ? allResults.filter(function(a) { return a.status === 'failed' || a.status === 'tls' }) :
+                     filter === 'quota'   ? allResults.filter(function(a) { return a.status === 'quota' }) :
+                     filter === 'timeout' ? allResults.filter(function(a) { return a.status === 'timeout' || a.status === 'connection' }) :
+                     allResults
+
+      if (filtered.length === 0) {
+        alert('No ' + filter + ' accounts to download')
+        setDownloading(null)
+        return
+      }
+
+      var lines = filtered.map(function(a) {
+        return a.email + ',' + (a.app_password || a.password || '')
+      })
+      var csv  = lines.join('\n')
+      var blob = new Blob([csv], { type: 'text/csv' })
+      var url  = URL.createObjectURL(blob)
+      var a    = document.createElement('a')
+      a.href     = url
+      a.download = filename + '-' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.csv'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert('Download error: ' + err.message)
+    }
+    setDownloading(null)
   }
 
   function statusColor(status) {
@@ -1180,6 +1217,43 @@ export function SmtpTester() {
             <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--txt3)', borderTop: '1px solid var(--bdr)', display: 'flex', justifyContent: 'space-between' }}>
               <span>Showing {filteredResults.length} of {results.length} results</span>
               <span>{testing ? '● Testing in progress...' : '✓ Test complete'}</span>
+            </div>
+          </div>
+
+          {/* Bulk Download Section */}
+          <div style={{marginTop:16, padding:'14px 16px', background:'#F8F9FC', borderRadius:10, border:'1px solid #E0E0E8'}}>
+            <div style={{fontWeight:700, fontSize:13, marginBottom:12, color:'#1A1A2E'}}>
+              ⬇️ Download SMTP Results
+            </div>
+            <div style={{display:'flex', flexWrap:'wrap', gap:8}}>
+              <button onClick={function() { downloadSmtpCsv('all', 'all-smtp') }}
+                disabled={downloading === 'all'}
+                style={{padding:'7px 14px', background:'#1A1A2E', border:'none', borderRadius:7, color:'white', fontSize:12, cursor:'pointer', fontWeight:600}}>
+                📋 All SMTP ({results.length})
+              </button>
+              <button onClick={function() { downloadSmtpCsv('working', 'working-smtp') }}
+                disabled={downloading === 'working'}
+                style={{padding:'7px 14px', background:'#1D7348', border:'none', borderRadius:7, color:'white', fontSize:12, cursor:'pointer', fontWeight:600}}>
+                ✅ Working ({results.filter(function(a){return a.status==='working'}).length})
+              </button>
+              <button onClick={function() { downloadSmtpCsv('failed', 'failed-smtp') }}
+                disabled={downloading === 'failed'}
+                style={{padding:'7px 14px', background:'#C0392B', border:'none', borderRadius:7, color:'white', fontSize:12, cursor:'pointer', fontWeight:600}}>
+                ❌ Failed ({results.filter(function(a){return a.status==='failed'||a.status==='tls'}).length})
+              </button>
+              <button onClick={function() { downloadSmtpCsv('quota', 'quota-smtp') }}
+                disabled={downloading === 'quota'}
+                style={{padding:'7px 14px', background:'#856404', border:'none', borderRadius:7, color:'white', fontSize:12, cursor:'pointer', fontWeight:600}}>
+                ⚡ Quota Exceeded ({results.filter(function(a){return a.status==='quota'}).length})
+              </button>
+              <button onClick={function() { downloadSmtpCsv('timeout', 'timeout-smtp') }}
+                disabled={downloading === 'timeout'}
+                style={{padding:'7px 14px', background:'#555', border:'none', borderRadius:7, color:'white', fontSize:12, cursor:'pointer', fontWeight:600}}>
+                ⏱ Timeout ({results.filter(function(a){return a.status==='timeout'||a.status==='connection'}).length})
+              </button>
+            </div>
+            <div style={{fontSize:11, color:'#9898B0', marginTop:8}}>
+              Downloads as CSV in format: email,app_password — ready to re-import
             </div>
           </div>
         </div>

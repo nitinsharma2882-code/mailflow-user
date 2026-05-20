@@ -300,14 +300,21 @@ export default function Dashboard() {
             {planInfo.plan === 'premium' ? '⭐' : planInfo.plan === 'standard' ? '🔷' : '🔲'}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>Instance Plan</span>
+            <div style={{
+              display:'flex', alignItems:'center', gap:8,
+              marginBottom:4,
+            }}>
               <span style={{
-                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px',
-                background: planInfo.plan === 'premium' ? 'rgba(245,166,35,0.15)' : planInfo.plan === 'standard' ? 'rgba(74,58,255,0.15)' : 'rgba(255,255,255,0.08)',
-                color: planInfo.plan === 'premium' ? '#F5A623' : planInfo.plan === 'standard' ? '#7B72FF' : 'var(--txt2)'
+                fontSize:11, fontWeight:700,
+                padding:'3px 10px', borderRadius:20,
+                background: planInfo.plan === 'basic'    ? 'rgba(150,150,150,0.15)' :
+                            planInfo.plan === 'standard' ? 'rgba(21,101,255,0.15)'  :
+                                                           'rgba(243,156,18,0.15)',
+                color: planInfo.plan === 'basic'    ? '#888888' :
+                       planInfo.plan === 'standard' ? '#1565FF'  :
+                                                      '#F39C12',
               }}>
-                {planInfo.label || planInfo.plan}
+                {(planInfo.planLabel || planInfo.plan || 'Basic').toUpperCase()} PLAN
               </span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--txt2)' }}>
@@ -316,7 +323,9 @@ export default function Dashboard() {
                 <div style={{
                   height: '100%', borderRadius: 2,
                   width: ((planInfo.usedInstances || 0) / (planInfo.maxInstances || 1) * 100) + '%',
-                  background: planInfo.plan === 'premium' ? '#F5A623' : planInfo.plan === 'standard' ? '#7B72FF' : '#888'
+                  background: planInfo.plan === 'basic'    ? '#888888' :
+                              planInfo.plan === 'standard' ? '#1565FF'  :
+                                                             '#F39C12'
                 }} />
               </div>
             </div>

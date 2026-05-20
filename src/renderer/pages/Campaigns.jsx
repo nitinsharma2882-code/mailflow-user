@@ -232,7 +232,7 @@ function Campaigns() {
             </div>
 
             {/* Row 2: Stats */}
-            <div style={{ display: 'flex', gap: 20, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 20, marginBottom: 6, flexWrap: 'wrap' }}>
               {[
                 ['📊 Total',   (c.total_recipients || 0).toLocaleString(), 'var(--txt)'],
                 ['✅ Sent',    (c.sent_count || 0).toLocaleString(),        '#1D7348'  ],
@@ -245,6 +245,9 @@ function Campaigns() {
                   <div style={{ fontSize: 16, fontWeight: 700, color }}>{val}</div>
                 </div>
               ))}
+            </div>
+            <div style={{ fontSize: 10, color: '#AAAAAA', marginBottom: 8 }}>
+              👁 Open &amp; click tracking — <span style={{ background: '#E8E8E8', color: '#888', padding: '1px 5px', borderRadius: 3, fontWeight: 700, fontSize: 9 }}>v2</span>
             </div>
 
             {/* Row 3: Progress bar */}

@@ -48,13 +48,24 @@ export default function Topbar({ licenseInfo }) {
       )}
 
       <div className={styles.actions}>
-        <Button variant="ghost" size="sm" onClick={() => setActivePage('verify')}>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M6.5 1L1 3.5v4C1 10.3 3.5 12.5 6.5 13c3-.5 5.5-2.7 5.5-5.5v-4L6.5 1z"
-              stroke="currentColor" strokeWidth="1.2"/>
-          </svg>
-          Verify emails
-        </Button>
+        <button
+          disabled
+          title="Email Verification — Coming in Version 2"
+          style={{
+            padding: '6px 14px',
+            background: 'transparent',
+            border: '1px solid #CCCCCC',
+            borderRadius: 6,
+            color: '#AAAAAA',
+            fontSize: 12,
+            cursor: 'not-allowed',
+            opacity: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+          ○ Verify emails <span style={{fontSize:9, background:'#E8E8E8', padding:'1px 5px', borderRadius:3, color:'#888'}}>v2</span>
+        </button>
         <Button variant="ghost" size="sm" onClick={() => setActivePage('test-campaign')}>
           🧪 Test
         </Button>
