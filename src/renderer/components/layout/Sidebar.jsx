@@ -76,6 +76,35 @@ export default function Sidebar() {
               const isActive = activePage === item.id
               const badge = item.id === 'campaigns' && runningCount > 0 ? runningCount : null
 
+              if (item.id === 'test-campaign') {
+                return (
+                  <div key={item.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    opacity: 0.4,
+                    cursor: 'not-allowed',
+                    pointerEvents: 'none',
+                    color: '#9898B0',
+                    fontSize: 13,
+                  }}>
+                    <span>✓</span>
+                    <span>Test Campaign</span>
+                    <span style={{
+                      fontSize: 9,
+                      background: '#F39C12',
+                      color: 'white',
+                      padding: '1px 5px',
+                      borderRadius: 3,
+                      fontWeight: 700,
+                      marginLeft: 'auto',
+                    }}>v2</span>
+                  </div>
+                )
+              }
+
               return (
                 <button
                   key={item.id}

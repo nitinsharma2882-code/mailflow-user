@@ -78,7 +78,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
               </div>
             )}
             <p style={{ fontSize: 13, color: '#9898B0', marginTop: 16 }}>
-              Loading FreqMail...
+              Loading MailEngine Pro...
             </p>
           </div>
         </div>
@@ -91,19 +91,16 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
       <div style={cardStyle}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <img
-            src="/assets/freqmail-logo.png"
-            alt="FreqMail"
-            style={{ maxWidth: 200, height: 'auto', marginBottom: 8 }}
-            onError={function(e) { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block' }}
-          />
-          <div style={{ display: 'none' }}>
-            <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-1px', marginBottom: 4 }}>
-              <span style={{ color: '#0D2C5B' }}>Freq</span><span style={{ color: '#1565FF' }}>Mail</span>
-            </div>
-          </div>
+          <svg viewBox="0 0 260 44" xmlns="http://www.w3.org/2000/svg"
+            style={{width:'170px', height:'36px', display:'block', margin:'0 auto 8px'}}>
+            <text x="2" y="34" fontFamily="DM Sans, Arial, system-ui"
+              fontSize="30" fontWeight="800" letterSpacing="-1">
+              <tspan fill="#0D2C5B">MailEngine</tspan>
+              <tspan fill="#1565FF"> Pro</tspan>
+            </text>
+          </svg>
           <div style={{ fontSize: 11, color: '#9898B0', letterSpacing: '1px', textTransform: 'uppercase' }}>
-            Send Smart. Stay Ahead.
+            Send Smart. Reach Everywhere.
           </div>
         </div>
 
@@ -122,7 +119,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
           {expiredPlan ? 'Renew your license' : 'Activate your license'}
         </h1>
         <p style={{ fontSize: 14, color: '#5A5A72', marginBottom: 28, lineHeight: 1.6 }}>
-          Enter your license key below. You received this after purchasing FreqMail.
+          Enter your license key below. You received this after purchasing MailEngine Pro.
         </p>
 
         {/* Input */}
@@ -169,7 +166,7 @@ export default function ActivationScreen({ onActivated, expiredPlan, expiredMess
             marginBottom: 20, transition: 'background 0.12s'
           }}
         >
-          {loading ? '⏳ Verifying...' : '🔑 Activate FreqMail'}
+          {loading ? '⏳ Verifying...' : '🔑 Activate MailEngine Pro'}
         </button>
 
         {/* Plans info */}
