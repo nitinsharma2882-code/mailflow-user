@@ -792,7 +792,8 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
   })
 
   try {
-    var agentHtmlBody = injectTrackingPixel(campaign.html_body || '', campaignId, 'pixel@mailflow.app')
+    // Tracking disabled in v1 — coming in v2
+    var agentHtmlBody = campaign.html_body || ''
 
     const result = await sendViaAgent(agentIp, agentPort, agentToken, {
       jobId,
@@ -1133,7 +1134,8 @@ async function processBatch(campaignId) {
             return
           }
 
-          const finalHtml   = injectTrackingPixel(html, campaignId, job.email)
+          // Tracking disabled in v1 — coming in v2
+          const finalHtml   = html
           const plainText   = state.campaign.text_body || generateTextVersion(html)
 
           const result = await deliverEmail(smtpEntry.server, {

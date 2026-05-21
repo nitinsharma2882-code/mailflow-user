@@ -136,6 +136,7 @@ contextBridge.exposeInMainWorld('api', {
     getTestResults:          (sid)    => ipcRenderer.invoke('license:getTestResults', sid),
     getPlan:                 ()       => ipcRenderer.invoke('license:getPlan'),
     getSlots:                ()       => ipcRenderer.invoke('license:getSlots'),
+    getCustomerInfo:         ()       => ipcRenderer.invoke('license:getCustomerInfo'),
   },
 
   // File dialogs

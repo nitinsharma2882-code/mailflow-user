@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import styles from './Sidebar.module.css'
 
@@ -38,6 +38,18 @@ export default function Sidebar() {
   const { activePage, setActivePage, campaigns } = useAppStore()
 
   const runningCount = campaigns.filter(c => c.status === 'running').length
+
+  const [customerInfo, setCustomerInfo] = useState({ name: '', email: '', key: '' })
+
+  useEffect(function() {
+    if (window.api && window.api.license && window.api.license.getCustomerInfo) {
+      window.api.license.getCustomerInfo().then(function(info) {
+        if (info && (info.name || info.key)) {
+          setCustomerInfo(info)
+        }
+      }).catch(function() {})
+    }
+  }, [])
 
   return (
     <aside className={styles.sidebar}>
@@ -83,10 +95,21 @@ export default function Sidebar() {
       {/* Footer */}
       <div className={styles.footer}>
         <div className={styles.userRow}>
-          <div className={styles.avatar}>RK</div>
+          <div className={styles.avatar}>
+            {(customerInfo.name || customerInfo.key || 'U')[0].toUpperCase()}
+          </div>
           <div className={styles.userInfo}>
-            <div className={styles.userName}>Rahul Kumar</div>
-            <div className={styles.userEmail}>rahul@company.com</div>
+            <div className={styles.userName}>
+              {customerInfo.name || customerInfo.key || 'User'}
+            </div>
+            <div className={styles.userEmail} style={{
+              fontFamily: 'monospace', overflow: 'hidden',
+              textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160,
+            }}>
+              {customerInfo.key
+                ? customerInfo.key.substring(0, 16) + '...'
+                : customerInfo.email || ''}
+            </div>
           </div>
         </div>
       </div>

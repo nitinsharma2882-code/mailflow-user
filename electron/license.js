@@ -283,7 +283,9 @@ async function checkLicense() {
     })
 
     if (result.success) {
-      global._mailflowLicenseKey = local.key
+      global._mailflowLicenseKey    = local.key
+      global._mailflowCustomerName  = result.license?.customerName  || result.license?.customer_name  || result.license?.name  || global._mailflowCustomerName  || ''
+      global._mailflowCustomerEmail = result.license?.customerEmail || result.license?.customer_email || result.license?.email || global._mailflowCustomerEmail || ''
       saveLicense(Object.assign({}, local, result.license, { lastVerified: new Date().toISOString() }))
       startSessionCheck()
       // Restore existing instance assignment on startup (does NOT auto-assign a new one)
@@ -383,7 +385,9 @@ async function activateLicense(licenseKey) {
         })
       }
 
-      global._mailflowLicenseKey = cleanKey
+      global._mailflowLicenseKey    = cleanKey
+      global._mailflowCustomerName  = result.license?.customerName  || result.license?.customer_name  || result.license?.name  || ''
+      global._mailflowCustomerEmail = result.license?.customerEmail || result.license?.customer_email || result.license?.email || ''
       saveLicense(Object.assign({
         key: cleanKey,
         hardwareId: hardwareId,
@@ -400,9 +404,13 @@ async function activateLicense(licenseKey) {
 }
 
 function registerLicenseHandlers() {
-  // Pre-load key into global for use in other IPC handlers
+  // Pre-load key + customer info into globals for use in other IPC handlers
   const _existing = loadLicense()
-  if (_existing && _existing.key) global._mailflowLicenseKey = _existing.key
+  if (_existing && _existing.key) {
+    global._mailflowLicenseKey    = _existing.key
+    global._mailflowCustomerName  = _existing.customerName  || _existing.customer_name  || _existing.name  || ''
+    global._mailflowCustomerEmail = _existing.customerEmail || _existing.customer_email || _existing.email || ''
+  }
 
   ipcMain.handle('license:check',         function() { return checkLicense() })
   ipcMain.handle('license:activate',      function(_, key) { return activateLicense(key) })
@@ -599,6 +607,14 @@ function registerLicenseHandlers() {
       return data
     } catch (err) {
       return { success: false, error: err.message, remaining: 0 }
+    }
+  })
+
+  ipcMain.handle('license:getCustomerInfo', function() {
+    return {
+      name:  global._mailflowCustomerName  || '',
+      email: global._mailflowCustomerEmail || '',
+      key:   global._mailflowLicenseKey    || '',
     }
   })
 
