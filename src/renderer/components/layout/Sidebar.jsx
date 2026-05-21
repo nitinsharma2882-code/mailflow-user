@@ -2,11 +2,14 @@ import React from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import styles from './Sidebar.module.css'
 
-const FreqMailLogo = function() {
+const MailEngineLogo = function() {
   return (
-    <svg viewBox="0 0 220 48" xmlns="http://www.w3.org/2000/svg" style={{width:'150px', height:'40px', display:'block'}}>
-      <text x="4" y="38" fontFamily="DM Sans, Arial, system-ui" fontSize="38" fontWeight="800" letterSpacing="-1">
-        <tspan fill="#FFFFFF">Freq</tspan><tspan fill="#1565FF">Mail</tspan>
+    <svg viewBox="0 0 280 48" xmlns="http://www.w3.org/2000/svg"
+      style={{width:'180px', height:'38px', display:'block'}}>
+      <text x="2" y="36" fontFamily="DM Sans, Arial, system-ui"
+        fontSize="32" fontWeight="800" letterSpacing="-1">
+        <tspan fill="#FFFFFF">MailEngine</tspan>
+        <tspan fill="#1565FF"> Pro</tspan>
       </text>
     </svg>
   )
@@ -44,9 +47,10 @@ export default function Sidebar() {
         borderBottom: '1px solid rgba(255,255,255,0.08)',
         marginBottom: 8,
       }}>
-        <FreqMailLogo />
-        <div style={{fontSize:10, color:'rgba(255,255,255,0.35)', letterSpacing:'1px', textTransform:'uppercase', marginTop:2}}>
-          Send Smart. Stay Ahead.
+        <MailEngineLogo />
+        <div style={{fontSize:9, color:'rgba(255,255,255,0.35)',
+          letterSpacing:'1px', textTransform:'uppercase', marginTop:2}}>
+          v0.1 — Send Smart. Reach Everywhere.
         </div>
       </div>
 

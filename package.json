@@ -1,7 +1,7 @@
 {
-  "name": "mailflow",
+  "name": "mailengine-pro",
   "version": "1.0.0",
-  "description": "FreqMail — Send Smart. Stay Ahead.",
+  "description": "MailEngine Pro — Send Smart. Reach Everywhere.",
   "main": "electron/main.js",
   "author": {
     "name": "Your Name",
@@ -55,8 +55,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.freqmail.app",
-    "productName": "FreqMail",
+    "appId": "com.mailengine.pro",
+    "productName": "MailEngine Pro",
     "copyright": "Copyright 2026 Your Name",
     "directories": {
       "output": "dist-electron",
@@ -103,7 +103,7 @@
       "allowElevation": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "FreqMail",
+      "shortcutName": "MailEngine Pro",
       "deleteAppDataOnUninstall": false
     },
     "mac": {

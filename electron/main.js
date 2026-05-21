@@ -32,7 +32,7 @@ function createWindow() {
       nodeIntegration: false,
     },
     show:  false,
-    title: 'FreqMail',
+    title: 'MailEngine Pro 0.1',
   })
 
   // Set Content Security Policy
