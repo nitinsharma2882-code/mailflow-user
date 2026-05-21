@@ -190,6 +190,7 @@ export default function App() {
 
   // Main app
   const PageComponent = PAGES[activePage] || Dashboard
+  const isTestCampaignPage = activePage === 'test-campaign'
   return (
     <>
       <Layout licenseInfo={licenseInfo}>
@@ -209,7 +210,39 @@ export default function App() {
         )}
         <ErrorBoundary key={activePage}>
           <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--txt3)', fontSize: 13 }}>Loading...</div>}>
-            <PageComponent />
+            {isTestCampaignPage ? (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '60vh',
+                color: '#9898B0',
+                textAlign: 'center',
+              }}>
+                <div style={{fontSize: 48, marginBottom: 16}}>🧪</div>
+                <div style={{fontSize: 22, fontWeight: 700, color: '#1a1a2e', marginBottom: 8}}>
+                  Test Campaign
+                </div>
+                <div style={{fontSize: 14, color: '#888', marginBottom: 16}}>
+                  This feature is coming in MailEngine Pro Version 2
+                </div>
+                <div style={{
+                  display: 'inline-block',
+                  background: 'rgba(243,156,18,0.1)',
+                  border: '1px solid rgba(243,156,18,0.4)',
+                  color: '#F39C12',
+                  padding: '6px 16px',
+                  borderRadius: 20,
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}>
+                  Coming in v2
+                </div>
+              </div>
+            ) : (
+              <PageComponent />
+            )}
           </Suspense>
         </ErrorBoundary>
       </Layout>

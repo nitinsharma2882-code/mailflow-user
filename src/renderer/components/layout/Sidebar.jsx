@@ -4,14 +4,27 @@ import styles from './Sidebar.module.css'
 
 const MailEngineLogo = function() {
   return (
-    <svg viewBox="0 0 280 48" xmlns="http://www.w3.org/2000/svg"
-      style={{width:'180px', height:'38px', display:'block'}}>
-      <text x="2" y="36" fontFamily="DM Sans, Arial, system-ui"
-        fontSize="32" fontWeight="800" letterSpacing="-1">
-        <tspan fill="#FFFFFF">MailEngine</tspan>
-        <tspan fill="#1565FF"> Pro</tspan>
-      </text>
-    </svg>
+    <div style={{display:'flex', flexDirection:'column'}}>
+      <div style={{
+        fontSize: 22,
+        fontWeight: 900,
+        letterSpacing: '-0.5px',
+        lineHeight: 1,
+        fontFamily: 'DM Sans, Segoe UI, Arial, system-ui',
+      }}>
+        <span style={{color:'#FFFFFF'}}>MailEngine</span>
+        <span style={{color:'#1565FF'}}> Pro</span>
+      </div>
+      <div style={{
+        fontSize: 9,
+        color: 'rgba(255,255,255,0.35)',
+        letterSpacing: '0.8px',
+        textTransform: 'uppercase',
+        marginTop: 3,
+      }}>
+        v0.1 — Send Smart. Reach Everywhere.
+      </div>
+    </div>
   )
 }
 
@@ -60,10 +73,6 @@ export default function Sidebar() {
         marginBottom: 8,
       }}>
         <MailEngineLogo />
-        <div style={{fontSize:9, color:'rgba(255,255,255,0.35)',
-          letterSpacing:'1px', textTransform:'uppercase', marginTop:2}}>
-          v0.1 — Send Smart. Reach Everywhere.
-        </div>
       </div>
 
       {/* Nav */}
@@ -82,18 +91,19 @@ export default function Sidebar() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    padding: '8px 16px',
+                    padding: '8px 12px',
                     borderRadius: 8,
                     opacity: 0.4,
                     cursor: 'not-allowed',
                     pointerEvents: 'none',
                     color: '#9898B0',
                     fontSize: 13,
+                    userSelect: 'none',
                   }}>
-                    <span>✓</span>
+                    <span style={{fontSize:14}}>✓</span>
                     <span>Test Campaign</span>
                     <span style={{
-                      fontSize: 9,
+                      fontSize: 8,
                       background: '#F39C12',
                       color: 'white',
                       padding: '1px 5px',

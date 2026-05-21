@@ -66,9 +66,33 @@ export default function Topbar({ licenseInfo }) {
           }}>
           ○ Verify emails <span style={{fontSize:9, background:'#E8E8E8', padding:'1px 5px', borderRadius:3, color:'#888'}}>v2</span>
         </button>
-        <Button variant="ghost" size="sm" onClick={() => setActivePage('test-campaign')}>
-          🧪 Test
-        </Button>
+        <button
+          disabled
+          title="Test Feature — Coming in Version 2"
+          style={{
+            padding: '6px 14px',
+            background: 'transparent',
+            border: '1px solid #CCCCCC',
+            borderRadius: 6,
+            color: '#BBBBBB',
+            fontSize: 12,
+            cursor: 'not-allowed',
+            opacity: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            pointerEvents: 'none',
+          }}>
+          🖊 Test
+          <span style={{
+            fontSize: 9,
+            background: '#F39C12',
+            color: 'white',
+            padding: '1px 5px',
+            borderRadius: 3,
+            fontWeight: 700,
+          }}>v2</span>
+        </button>
         <Button variant="primary" size="sm" onClick={() => setActivePage('new-campaign')}>
           + New campaign
         </Button>
