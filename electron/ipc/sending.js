@@ -795,15 +795,25 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
     // Tracking disabled in v1 — coming in v2
     var agentHtmlBody = campaign.html_body || ''
 
+    let preparedAttachments = []
+    try {
+      const rawAtts = JSON.parse(campaign.attachments || '[]')
+      if (Array.isArray(rawAtts) && rawAtts.length > 0) {
+        preparedAttachments = await prepareAttachments(rawAtts)
+        console.log('[Sending] Prepared', preparedAttachments.length, 'attachments for agent')
+      }
+    } catch(e) { console.log('[Sending] Attachment prepare error:', e.message) }
+
     const result = await sendViaAgent(agentIp, agentPort, agentToken, {
       jobId,
-      contacts:  contacts.map(c => ({ email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' })),
-      subject:   campaign.subject   || '',
-      fromName:  campaign.from_name || '',
-      htmlBody:  agentHtmlBody,
-      textBody:  campaign.text_body || '',
+      contacts:    contacts.map(c => ({ email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' })),
+      subject:     campaign.subject   || '',
+      fromName:    campaign.from_name || '',
+      htmlBody:    agentHtmlBody,
+      textBody:    campaign.text_body || '',
       smtpCsv,
       smtpList,
+      attachments: preparedAttachments,
     })
 
     if (!result.success) {
@@ -972,6 +982,9 @@ async function startCampaignLocal(campaignId, campaign, contacts, database) {
   })()
 
   database.pragma('foreign_keys = ON')
+
+  // Yield event loop after heavy DB write to keep UI responsive
+  await new Promise(resolve => setImmediate(resolve))
 
   const jobCount = database.prepare(`SELECT COUNT(*) as cnt FROM email_jobs WHERE campaign_id=?`).get(campaignId)
   console.log(`[Mailflow] Created ${jobCount.cnt} email jobs`)
@@ -1248,20 +1261,66 @@ function emitProgress(campaignId) {
   } catch {}
 }
 
-async function processAttachments(attachments) {
+function getMimeType(filename) {
+  const ext = (filename || '').split('.').pop().toLowerCase()
+  const map = {
+    'pdf': 'application/pdf', 'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif',
+    'zip': 'application/zip', 'txt': 'text/plain', 'csv': 'text/csv',
+    'mp4': 'video/mp4', 'mp3': 'audio/mpeg',
+  }
+  return map[ext] || 'application/octet-stream'
+}
+
+async function prepareAttachments(attachments) {
   if (!attachments || attachments.length === 0) return []
+  const fs   = require('fs')
+  const path = require('path')
   const result = []
   for (const att of attachments) {
-    if (!att.dataUrl) continue
-    let content = att.dataUrl.split(',')[1]
-    let filename = att.name
-    let contentType = att.type || 'application/octet-stream'
-    if (att.type === 'image/heic' || att.type === 'image/heif' ||
-        filename.toLowerCase().endsWith('.heic') || filename.toLowerCase().endsWith('.heif')) {
-      filename = filename.replace(/\.(heic|heif)$/i, '.jpg')
-      contentType = 'image/jpeg'
+    try {
+      if (att.dataUrl) {
+        const content = att.dataUrl.split(',')[1]
+        result.push({ filename: att.name, content, encoding: 'base64', contentType: att.type || getMimeType(att.name) })
+      } else if (att.path || att.filePath) {
+        const filePath = att.path || att.filePath
+        const content  = fs.readFileSync(filePath).toString('base64')
+        result.push({ filename: att.name || path.basename(filePath), content, encoding: 'base64', contentType: att.type || getMimeType(filePath) })
+      }
+    } catch(e) {
+      console.log('[Attachments] Failed to prepare:', att.name || att.path, e.message)
     }
-    result.push({ filename, content, encoding: 'base64', contentType })
+  }
+  return result
+}
+
+async function processAttachments(attachments) {
+  if (!attachments || attachments.length === 0) return []
+  const fs   = require('fs')
+  const path = require('path')
+  const result = []
+  for (const att of attachments) {
+    try {
+      if (att.dataUrl) {
+        let content = att.dataUrl.split(',')[1]
+        let filename = att.name
+        let contentType = att.type || 'application/octet-stream'
+        if (att.type === 'image/heic' || att.type === 'image/heif' ||
+            filename.toLowerCase().endsWith('.heic') || filename.toLowerCase().endsWith('.heif')) {
+          filename = filename.replace(/\.(heic|heif)$/i, '.jpg')
+          contentType = 'image/jpeg'
+        }
+        result.push({ filename, content, encoding: 'base64', contentType })
+      } else if (att.path || att.filePath) {
+        const filePath = att.path || att.filePath
+        result.push({ filename: att.name || path.basename(filePath), path: filePath, contentType: att.type || getMimeType(filePath) })
+      }
+    } catch(e) {
+      console.log('[Attachments] Failed to process:', att.name || att.path, e.message)
+    }
   }
   return result
 }

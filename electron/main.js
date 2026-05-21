@@ -3,6 +3,9 @@ const path = require('path')
 
 const isDev = process.env.NODE_ENV === 'development'
 
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+
 const { registerCampaignHandlers }   = require('./ipc/campaigns')
 const { registerContactHandlers }    = require('./ipc/contacts')
 const { registerServerHandlers }     = require('./ipc/servers')
@@ -30,6 +33,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
     show:  false,
     title: 'MailEngine Pro 0.1',

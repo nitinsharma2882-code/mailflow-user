@@ -96,7 +96,7 @@ function InstanceSelector({ value, onChange, instances, onRefresh, selectedIps, 
 export default function MultiCampaign() {
   const { resendCampaign, clearResendCampaign, setActivePage, addToast } = useAppStore()
 
-  const [template, setTemplate]       = useState({ subject: '', fromName: '', html_body: '' })
+  const [template, setTemplate]       = useState({ subject: '', fromName: '', html_body: '', attachments: [] })
   const [instances, setInstances]     = useState([])
   const [pages, setPages]             = useState([
     { id: 1, contactListId: '', contacts: 0, smtpAccounts: [], instanceIp: '', status: 'idle', sent: 0, failed: 0, total: 0, pageKey: null }
@@ -106,6 +106,7 @@ export default function MultiCampaign() {
   const [campaignId]                  = useState('multi-' + Date.now())
   const [slots, setSlots]             = useState(null)
   const [slotsLoading, setSlotsLoading] = useState(false)
+  const [pageLoading, setPageLoading] = useState(true)
   const listenersAttached             = useRef(false)
 
   // Real-time slot tracking — derived from local page state on every render
@@ -175,15 +176,20 @@ export default function MultiCampaign() {
 
   useEffect(function() {
     if (resendCampaign) {
+      var parsedAtts = []
+      try { parsedAtts = JSON.parse(resendCampaign.attachments || '[]') } catch {}
       setTemplate({
-        subject:   resendCampaign.subject   || '',
-        fromName:  resendCampaign.from_name || '',
-        html_body: resendCampaign.html_body || '',
+        subject:     resendCampaign.subject   || '',
+        fromName:    resendCampaign.from_name || '',
+        html_body:   resendCampaign.html_body || '',
+        attachments: Array.isArray(parsedAtts) ? parsedAtts : [],
       })
       clearResendCampaign()
     }
-    loadInstances()
-    loadSlots()
+    requestAnimationFrame(function() {
+      loadInstances()
+      loadSlots().then(function() { setPageLoading(false) }).catch(function() { setPageLoading(false) })
+    })
 
     if (!listenersAttached.current) {
       listenersAttached.current = true
@@ -323,6 +329,7 @@ export default function MultiCampaign() {
           subject:        template.subject,
           fromName:       template.fromName,
           html_body:      template.html_body,
+          attachments:    template.attachments || [],
           smtpAccounts:   page.smtpAccounts,
           instanceIp:     page.instanceIp,
           instanceToken:  'mailflow-agent-2026',
@@ -366,6 +373,15 @@ export default function MultiCampaign() {
 
   var allCompleted = pages.length > 0 && pages.every(function(p) { return p.status === 'completed' })
   var anyRunning   = pages.some(function(p) { return p.status === 'running' || p.status === 'launching' })
+
+  if (pageLoading) {
+    return (
+      <div style={{display:'flex', alignItems:'center', justifyContent:'center', height:'60vh', color:'var(--txt3)', flexDirection:'column', gap:12}}>
+        <div style={{width:32, height:32, border:'3px solid var(--bdr)', borderTopColor:'var(--pu)', borderRadius:'50%', animation:'spin 0.8s linear infinite'}} />
+        <div style={{fontSize:13}}>Loading campaign...</div>
+      </div>
+    )
+  }
 
   return (
     <div style={{fontFamily:'var(--font)'}}>
@@ -554,6 +570,20 @@ export default function MultiCampaign() {
                   )}
                 </div>
               </div>
+
+              {/* Attachments indicator (read-only, from cloned campaign) */}
+              {template.attachments && template.attachments.length > 0 && (
+                <div style={{background:'var(--bg)', border:'1px solid var(--bdr)', borderRadius:'var(--rad)', padding:14}}>
+                  <div style={{fontWeight:600, fontSize:12, marginBottom:10, color:'var(--txt2)'}}>📎 Attachments</div>
+                  <div style={{textAlign:'center', padding:'8px 0'}}>
+                    <div style={{fontSize:22, marginBottom:4}}>📎</div>
+                    <div style={{fontSize:12, fontWeight:600}}>{template.attachments.length} file{template.attachments.length > 1 ? 's' : ''}</div>
+                    <div style={{fontSize:11, color:'var(--txt3)', marginTop:4}}>
+                      {template.attachments.map(function(a) { return a.name || a.filename || 'file' }).join(', ')}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Instance IP */}
               <div style={{background:'var(--bg)', border:'1px solid var(--bdr)', borderRadius:'var(--rad)', padding:14}}>
