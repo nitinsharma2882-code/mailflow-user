@@ -448,12 +448,6 @@ function registerLicenseHandlers() {
 
   ipcMain.handle('license:getInstance', async function() {
     try {
-      // Block getInstance for 10 minutes after a release
-      if (global._mailflowReleaseTime && (Date.now() - global._mailflowReleaseTime) < 600000) {
-        console.log('[getInstance] Blocked — instance was recently released')
-        return { success: false, hasQuarantined: true, error: 'Instance under admin review' }
-      }
-
       const licenseKey = global._mailflowLicenseKey || ''
       if (!licenseKey) return { success: false, error: 'No license key. Activate software first.' }
 
@@ -499,8 +493,6 @@ function registerLicenseHandlers() {
         global._mailflowInstanceMap.delete(licenseKey)
         global._mailflowAssignedInstance = null
         broadcastInstanceChanged(null)
-        // Stop any future getInstance calls for 10 minutes after release
-        global._mailflowReleaseTime = Date.now()
         console.log('[Release] Instance released, cleared assignment')
         fireLog('/api/log/activity', { event: 'instance_released', details: 'Instance released', hardware_id: getHardwareId() })
       }
