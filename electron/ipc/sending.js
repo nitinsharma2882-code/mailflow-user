@@ -1290,9 +1290,7 @@ async function prepareAttachments(attachments) {
         const content  = fs.readFileSync(filePath).toString('base64')
         result.push({ filename: att.name || path.basename(filePath), content, encoding: 'base64', contentType: att.type || getMimeType(filePath) })
       }
-    } catch(e) {
-      console.log('[Attachments] Failed to prepare:', att.name || att.path, e.message)
-    }
+    } catch(e) { /* skip unreadable attachment */ }
   }
   return result
 }
@@ -1318,9 +1316,7 @@ async function processAttachments(attachments) {
         const filePath = att.path || att.filePath
         result.push({ filename: att.name || path.basename(filePath), path: filePath, contentType: att.type || getMimeType(filePath) })
       }
-    } catch(e) {
-      console.log('[Attachments] Failed to process:', att.name || att.path, e.message)
-    }
+    } catch(e) { /* skip unreadable attachment */ }
   }
   return result
 }
