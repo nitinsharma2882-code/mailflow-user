@@ -125,7 +125,7 @@ function Campaigns() {
         aws_secret_key:   data.aws_secret_key   || campaign.aws_secret_key   || '',
         aws_region:       data.aws_region       || campaign.aws_region       || 'us-east-1',
         aws_sender_email: data.aws_sender_email || campaign.aws_sender_email || '',
-        attachments:      attsStr,
+        attachments:      attsRaw,
       })
       setActivePage('multi-campaign')
     } catch (err) {
