@@ -25,6 +25,7 @@ export default function Dashboard() {
       if (result && result.success && result.ip) {
         setInstanceInfo(result)
         addToast('✅ Server assigned: ' + result.ip, 'success')
+        loadPlan()
       } else if (result && result.limitReached) {
         addToast(
           '⚠️ Instance limit reached (' + (result.currentCount || '') + '/' + (result.maxAllowed || 5) + '). ' +
@@ -56,6 +57,7 @@ export default function Dashboard() {
     try {
       const result = await window.api.license.releaseInstance()
       if (result && result.success) {
+        loadPlan()
         if (result.quarantined) {
           setInstanceInfo(null)
           addToast('✅ Instance released to quarantine. Contact admin for a new instance.', 'success')
