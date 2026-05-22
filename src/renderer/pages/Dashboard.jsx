@@ -10,7 +10,8 @@ export default function Dashboard() {
   const [instanceInfo, setInstanceInfo]         = useState(null)
   const [loadingInstance, setLoadingInstance]   = useState(false)
   const [planInfo, setPlanInfo]                 = useState(null)
-  const refreshingRef = useRef(false)
+  const refreshingRef        = useRef(false)
+  const quarantineWarnedRef  = useRef(false)
 
   const handleRefreshInstance = useCallback(async () => {
     if (refreshingRef.current) {
@@ -45,8 +46,9 @@ export default function Dashboard() {
   const handleReleaseInstance = useCallback(async () => {
     const confirmed = confirm(
       'Release your current instance?\n\n' +
-      '• If pool has available instances — you get one immediately\n' +
-      '• If pool is empty — new instance created (5-10 minutes)\n\n' +
+      '• Your instance will be sent to quarantine for admin review\n' +
+      '• You will not get a new instance automatically\n' +
+      '• Contact support to get a new instance assigned\n\n' +
       'Continue?'
     )
     if (!confirmed) return
@@ -54,7 +56,10 @@ export default function Dashboard() {
     try {
       const result = await window.api.license.releaseInstance()
       if (result && result.success) {
-        if (result.atLimit) {
+        if (result.quarantined) {
+          setInstanceInfo(null)
+          addToast('✅ Instance released to quarantine. Contact admin for a new instance.', 'success')
+        } else if (result.atLimit) {
           setInstanceInfo(null)
           addToast('✅ Instance released to quarantine. You are at your plan limit. Contact admin to restore slots.', 'success')
         } else if (result.newIp) {
@@ -93,7 +98,13 @@ export default function Dashboard() {
     autoLoadInstance()
     var interval = setInterval(function() {
       window.api.license.getInstance().then(function(result) {
-        if (result && result.success && result.ip) {
+        if (result && result.hasQuarantined) {
+          if (!quarantineWarnedRef.current) {
+            quarantineWarnedRef.current = true
+            addToast('⚠️ Your instance is under admin review. Contact support.', 'error')
+          }
+          clearInterval(interval)
+        } else if (result && result.success && result.ip) {
           setInstanceInfo(result)
         }
       }).catch(function() {})
