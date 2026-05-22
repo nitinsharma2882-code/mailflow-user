@@ -93,8 +93,25 @@ function Campaigns() {
     try {
       const full = await window.api.campaigns.getById(campaign.id)
       const data = full || campaign
-      var attsRaw = data.attachments || campaign.attachments || '[]'
-      var attsStr = Array.isArray(attsRaw) ? JSON.stringify(attsRaw) : (typeof attsRaw === 'string' ? attsRaw : '[]')
+      var attsRaw = '[]'
+      try {
+        var campAtts = data.attachments || campaign.attachments || '[]'
+        var campAttsParsed = typeof campAtts === 'string' ? JSON.parse(campAtts) : campAtts
+        if (Array.isArray(campAttsParsed) && campAttsParsed.length > 0) {
+          attsRaw = JSON.stringify(campAttsParsed)
+        } else {
+          var templateId = data.template_id || campaign.template_id
+          if (templateId) {
+            var tpl = await window.api.templates.getById(templateId)
+            if (tpl && tpl.attachments) {
+              var tplAtts = typeof tpl.attachments === 'string' ? JSON.parse(tpl.attachments) : tpl.attachments
+              if (Array.isArray(tplAtts) && tplAtts.length > 0) {
+                attsRaw = JSON.stringify(tplAtts)
+              }
+            }
+          }
+        }
+      } catch(e) {}
       setResendCampaign({
         subject:          data.subject          || campaign.subject          || '',
         from_name:        data.from_name        || campaign.from_name        || '',
