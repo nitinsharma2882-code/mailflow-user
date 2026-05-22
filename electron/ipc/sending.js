@@ -384,6 +384,7 @@ function registerSendingHandlers() {
     var subject        = pageData.subject
     var fromName       = pageData.fromName
     var html_body      = pageData.html_body
+    var attachments    = pageData.attachments || []
     var smtpAccounts   = pageData.smtpAccounts
     var instanceIp     = pageData.instanceIp
     var instanceToken  = pageData.instanceToken
@@ -406,15 +407,17 @@ function registerSendingHandlers() {
     if (!smtpCsv) return { success: false, error: 'No SMTP accounts for page ' + pageId }
 
     try {
+      var preparedPageAttachments = await prepareAttachments(attachments)
       var result = await sendViaAgent(instanceIp, 3000, agentToken, {
-        jobId:    jobId,
-        contacts: contacts.map(function(c) {
+        jobId:          jobId,
+        contacts:       contacts.map(function(c) {
           return { email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' }
         }),
-        subject:  subject,
-        fromName: fromName,
-        htmlBody: html_body,
-        smtpCsv:  smtpCsv,
+        subject:        subject,
+        fromName:       fromName,
+        htmlBody:       html_body,
+        smtpCsv:        smtpCsv,
+        rawAttachments: preparedPageAttachments,
       })
 
       if (!result.success) {

@@ -93,6 +93,8 @@ function Campaigns() {
     try {
       const full = await window.api.campaigns.getById(campaign.id)
       const data = full || campaign
+      var attsRaw = data.attachments || campaign.attachments || '[]'
+      var attsStr = Array.isArray(attsRaw) ? JSON.stringify(attsRaw) : (typeof attsRaw === 'string' ? attsRaw : '[]')
       setResendCampaign({
         subject:          data.subject          || campaign.subject          || '',
         from_name:        data.from_name        || campaign.from_name        || '',
@@ -106,7 +108,7 @@ function Campaigns() {
         aws_secret_key:   data.aws_secret_key   || campaign.aws_secret_key   || '',
         aws_region:       data.aws_region       || campaign.aws_region       || 'us-east-1',
         aws_sender_email: data.aws_sender_email || campaign.aws_sender_email || '',
-        attachments:      data.attachments      || campaign.attachments      || '[]',
+        attachments:      attsStr,
       })
       setActivePage('multi-campaign')
     } catch (err) {

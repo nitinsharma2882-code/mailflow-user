@@ -177,7 +177,12 @@ export default function MultiCampaign() {
   useEffect(function() {
     if (resendCampaign) {
       var parsedAtts = []
-      try { parsedAtts = JSON.parse(resendCampaign.attachments || '[]') } catch {}
+      var rawAtts = resendCampaign.attachments
+      if (Array.isArray(rawAtts)) {
+        parsedAtts = rawAtts
+      } else {
+        try { parsedAtts = JSON.parse(rawAtts || '[]') } catch {}
+      }
       setTemplate({
         subject:     resendCampaign.subject   || '',
         fromName:    resendCampaign.from_name || '',
@@ -573,14 +578,19 @@ export default function MultiCampaign() {
 
               {/* Attachments indicator (read-only, from cloned campaign) */}
               {template.attachments && template.attachments.length > 0 && (
-                <div style={{background:'var(--bg)', border:'1px solid var(--bdr)', borderRadius:'var(--rad)', padding:14}}>
-                  <div style={{fontWeight:600, fontSize:12, marginBottom:10, color:'var(--txt2)'}}>📎 Attachments</div>
-                  <div style={{textAlign:'center', padding:'8px 0'}}>
-                    <div style={{fontSize:22, marginBottom:4}}>📎</div>
-                    <div style={{fontSize:12, fontWeight:600}}>{template.attachments.length} file{template.attachments.length > 1 ? 's' : ''}</div>
-                    <div style={{fontSize:11, color:'var(--txt3)', marginTop:4}}>
-                      {template.attachments.map(function(a) { return a.name || a.filename || 'file' }).join(', ')}
-                    </div>
+                <div style={{background:'var(--bg)', border:'1px solid #4A3AFF33', borderRadius:'var(--rad)', padding:14}}>
+                  <div style={{fontWeight:600, fontSize:12, marginBottom:8, color:'#4A3AFF'}}>
+                    📎 Attachments ({template.attachments.length}) — will send with this page
+                  </div>
+                  <div style={{display:'flex', flexDirection:'column', gap:4}}>
+                    {template.attachments.map(function(a, i) {
+                      return (
+                        <div key={i} style={{fontSize:11, color:'var(--txt2)', background:'var(--bg2)',
+                          borderRadius:4, padding:'4px 8px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                          📄 {a.name || a.filename || 'attachment'}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
