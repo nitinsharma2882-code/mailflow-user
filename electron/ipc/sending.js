@@ -604,6 +604,13 @@ async function startCampaign(campaignId) {
   `).get(campaignId)
   if (!campaign) return { success: false, error: 'Campaign not found' }
 
+  // Mirror template attachments into campaign record so getById returns them for Clone & Reuse
+  if (campaign.attachments && campaign.attachments !== '[]') {
+    try {
+      database.prepare("UPDATE campaigns SET attachments = ? WHERE id = ?").run(campaign.attachments, campaignId)
+    } catch {}
+  }
+
   const contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(campaign.contact_list_id)
   if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
 
@@ -795,14 +802,31 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
     // Tracking disabled in v1 — coming in v2
     var agentHtmlBody = campaign.html_body || ''
 
-    let preparedAttachments = []
+    // Always read attachments fresh — try campaign first, fallback to template
+    var rawAttachments = []
     try {
-      const rawAtts = JSON.parse(campaign.attachments || '[]')
-      if (Array.isArray(rawAtts) && rawAtts.length > 0) {
-        preparedAttachments = await prepareAttachments(rawAtts)
-        console.log('[Sending] Prepared', preparedAttachments.length, 'attachments for agent')
+      var campaignAttStr = campaign.attachments || '[]'
+      var campaignAtts   = typeof campaignAttStr === 'string' ? JSON.parse(campaignAttStr) : (campaignAttStr || [])
+      if (Array.isArray(campaignAtts) && campaignAtts.length > 0) {
+        rawAttachments = campaignAtts
+        console.log('[Sending] Using campaign attachments:', rawAttachments.length)
+      } else {
+        var agentDatabase = db.get()
+        var tplRow = agentDatabase.prepare('SELECT attachments FROM templates WHERE id = ?').get(campaign.template_id)
+        if (tplRow && tplRow.attachments) {
+          var templateAtts = typeof tplRow.attachments === 'string' ? JSON.parse(tplRow.attachments) : (tplRow.attachments || [])
+          if (Array.isArray(templateAtts) && templateAtts.length > 0) {
+            rawAttachments = templateAtts
+            console.log('[Sending] Using template attachments:', rawAttachments.length)
+          }
+        }
       }
-    } catch(e) { console.log('[Sending] Attachment prepare error:', e.message) }
+    } catch (err) {
+      console.log('[Sending] Attachment load error:', err.message)
+      rawAttachments = []
+    }
+    console.log('[Sending] Final attachment count:', rawAttachments.length)
+    var preparedAttachments = await prepareAttachments(rawAttachments)
 
     const result = await sendViaAgent(agentIp, agentPort, agentToken, {
       jobId,
@@ -1127,12 +1151,20 @@ async function processBatch(campaignId) {
 
           let templateAttachments = []
           try {
-            const rawAtts = JSON.parse(state.campaign.attachments || '[]')
-            if (Array.isArray(rawAtts) && rawAtts.length > 0) {
-              templateAttachments = await processAttachments(rawAtts)
+            var batchAttStr  = state.campaign.attachments || '[]'
+            var batchRawAtts = typeof batchAttStr === 'string' ? JSON.parse(batchAttStr) : (batchAttStr || [])
+            if (Array.isArray(batchRawAtts) && batchRawAtts.length > 0) {
+              templateAttachments = await processAttachments(batchRawAtts)
+            } else if (state.campaign.template_id) {
+              var batchTplRow = database.prepare('SELECT attachments FROM templates WHERE id = ?').get(state.campaign.template_id)
+              if (batchTplRow && batchTplRow.attachments) {
+                var batchTplAtts = typeof batchTplRow.attachments === 'string' ? JSON.parse(batchTplRow.attachments) : (batchTplRow.attachments || [])
+                if (Array.isArray(batchTplAtts) && batchTplAtts.length > 0) {
+                  templateAttachments = await processAttachments(batchTplAtts)
+                }
+              }
             }
           } catch(e) {
-            console.log('[Send] attachment parse error, sending without attachments:', e.message)
             templateAttachments = []
           }
 
@@ -1279,20 +1311,38 @@ async function prepareAttachments(attachments) {
   if (!attachments || attachments.length === 0) return []
   const fs   = require('fs')
   const path = require('path')
-  const result = []
+  const prepared = []
   for (const att of attachments) {
     try {
       if (att.dataUrl) {
-        const content = att.dataUrl.split(',')[1]
-        result.push({ filename: att.name, content, encoding: 'base64', contentType: att.type || getMimeType(att.name) })
-      } else if (att.path || att.filePath) {
+        var dataUrl = att.dataUrl.trim()
+        if (!dataUrl.includes('base64,')) {
+          console.log('[Sending] Invalid dataUrl format — skipping:', att.name)
+          continue
+        }
+        var commaIndex = dataUrl.indexOf('base64,')
+        var base64     = dataUrl.substring(commaIndex + 7)
+        var mimeMatch  = dataUrl.match(/data:([^;]+);/)
+        var mimeType   = mimeMatch ? mimeMatch[1] : (att.type || 'application/octet-stream')
+        var filename   = att.filename || att.name || att.originalName || 'attachment'
+        if (!base64 || base64.length < 10) {
+          console.log('[Sending] Empty base64 data — skipping attachment:', filename)
+          continue
+        }
+        prepared.push({ filename, content: base64, encoding: 'base64', contentType: mimeType })
+        console.log('[Sending] Prepared attachment:', filename, Math.round(base64.length * 0.75 / 1024) + 'KB')
+        continue
+      }
+      if (att.path || att.filePath) {
         const filePath = att.path || att.filePath
         const content  = fs.readFileSync(filePath).toString('base64')
-        result.push({ filename: att.name || path.basename(filePath), content, encoding: 'base64', contentType: att.type || getMimeType(filePath) })
+        const filename = att.filename || att.name || path.basename(filePath)
+        prepared.push({ filename, content, encoding: 'base64', contentType: att.type || getMimeType(filePath) })
+        console.log('[Sending] Prepared file attachment:', filename)
       }
     } catch(e) { /* skip unreadable attachment */ }
   }
-  return result
+  return prepared
 }
 
 async function processAttachments(attachments) {
