@@ -490,22 +490,10 @@ function registerLicenseHandlers() {
       const data = res.json()
 
       if (data.success) {
-        if (data.newIp) {
-          const instanceData = {
-            ip:         data.newIp,
-            agentToken: data.agentToken || 'mailflow-agent-2026',
-            agentPort:  data.agentPort  || 3000,
-          }
-          global._mailflowInstanceMap.set(licenseKey, instanceData)
-          global._mailflowAssignedInstance = instanceData
-          broadcastInstanceChanged(instanceData)
-          console.log('[Release] Auto-assigned from pool:', data.newIp)
-        } else {
-          global._mailflowInstanceMap.delete(licenseKey)
-          global._mailflowAssignedInstance = null
-          broadcastInstanceChanged(null)
-          console.log('[Release] No pool instance, cleared assignment')
-        }
+        global._mailflowInstanceMap.delete(licenseKey)
+        global._mailflowAssignedInstance = null
+        broadcastInstanceChanged(null)
+        console.log('[Release] Instance released, cleared assignment')
         fireLog('/api/log/activity', { event: 'instance_released', details: 'Instance released', hardware_id: getHardwareId() })
       }
       return data

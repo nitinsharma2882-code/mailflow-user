@@ -831,6 +831,8 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
     console.log('[Sending] Final attachment count:', rawAttachments.length)
     var preparedAttachments = await prepareAttachments(rawAttachments)
 
+    // Yield before building + stringifying large payload so event loop stays responsive
+    await new Promise(r => setImmediate(r))
     const result = await sendViaAgent(agentIp, agentPort, agentToken, {
       jobId,
       contacts:    contacts.map(c => ({ email: c.email, name: c.name || '', address: c.address || '', unique_id: c.unique_id || '' })),
@@ -1338,7 +1340,8 @@ async function prepareAttachments(attachments) {
       }
       if (att.path || att.filePath) {
         const filePath = att.path || att.filePath
-        const content  = fs.readFileSync(filePath).toString('base64')
+        const buf      = await fs.promises.readFile(filePath)
+        const content  = buf.toString('base64')
         const filename = att.filename || att.name || path.basename(filePath)
         prepared.push({ filename, content, encoding: 'base64', contentType: att.type || getMimeType(filePath) })
         console.log('[Sending] Prepared file attachment:', filename)
