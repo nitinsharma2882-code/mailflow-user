@@ -97,14 +97,8 @@ export default function Dashboard() {
   useEffect(function() {
     autoLoadInstance()
     var interval = setInterval(function() {
-      window.api.license.getInstance().then(function(result) {
-        if (result && result.hasQuarantined) {
-          if (!quarantineWarnedRef.current) {
-            quarantineWarnedRef.current = true
-            addToast('⚠️ Your instance is under admin review. Contact support.', 'error')
-          }
-          clearInterval(interval)
-        } else if (result && result.success && result.ip) {
+      window.api.license.getCurrentInstance().then(function(result) {
+        if (result && result.success && result.ip) {
           setInstanceInfo(result)
         }
       }).catch(function() {})
@@ -126,7 +120,7 @@ export default function Dashboard() {
 
   async function autoLoadInstance() {
     try {
-      const result = await window.api.license.getInstance()
+      const result = await window.api.license.getCurrentInstance()
       if (result && result.success && result.ip) {
         setInstanceInfo(result)
         console.log('[Dashboard] Instance loaded:', result.ip)
