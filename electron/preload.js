@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('api', {
     authenticate:  (id)    => ipcRenderer.invoke('gmail:authenticate', id),
     removeAccount: (id)    => ipcRenderer.invoke('gmail:removeAccount', id),
     testAccount:   (id)    => ipcRenderer.invoke('gmail:testAccount', id),
+    sendCampaign:  (id)    => ipcRenderer.invoke('gmail:sendCampaign', id),
   },
 
   // License

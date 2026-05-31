@@ -642,15 +642,14 @@ function registerSendingHandlers() {
     if (!account.access_token) return { success: false, error: 'Account not authenticated yet' }
     try {
       const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com', port: 465, secure: true,
+        host: 'smtp.gmail.com', port: 587, secure: false,
         auth: {
           type:         'OAuth2',
           user:         account.email,
-          accessToken:  account.access_token,
-          refreshToken: account.refresh_token,
-          expires:      account.token_expiry,
           clientId:     account.client_id,
           clientSecret: account.client_secret,
+          refreshToken: account.refresh_token,
+          accessToken:  account.access_token,
         },
       })
       await transporter.sendMail({
@@ -664,6 +663,10 @@ function registerSendingHandlers() {
     } catch (err) {
       return { success: false, error: err.message }
     }
+  })
+
+  ipcMain.handle('gmail:sendCampaign', async (_, campaignId) => {
+    return startCampaignGmailLocal(campaignId)
   })
 
   ipcMain.handle('sending:runTestCampaign', async (_, campaignData) => {
@@ -928,28 +931,7 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
   let customSmtpList = []
   try { customSmtpList = JSON.parse(campaign.custom_smtp_list || '[]') } catch {}
 
-  if (sending_mode === 'gmail_api') {
-    const gmailRows = database.prepare("SELECT * FROM gmail_accounts WHERE status = 'authenticated'").all()
-    if (gmailRows.length === 0) {
-      return { success: false, error: 'No authenticated Gmail accounts found. Go back to Step 3 and authenticate your Gmail accounts first.' }
-    }
-    smtpList = gmailRows.map(a => ({
-      email:  a.email,
-      host:   'smtp.gmail.com',
-      port:   465,
-      secure: true,
-      auth: {
-        type:         'OAuth2',
-        user:         a.email,
-        accessToken:  a.access_token,
-        refreshToken: a.refresh_token,
-        expires:      a.token_expiry,
-        clientId:     a.client_id,
-        clientSecret: a.client_secret,
-      },
-    }))
-    console.log(`[Mailflow] Gmail API mode — ${gmailRows.length} authenticated account(s)`)
-  } else if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+  if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
     const validAccounts = customSmtpList.filter(a => a.email && (a.app_password || a.password) && a.working !== false)
     smtpCsv = validAccounts.map(a => a.email + ',' + (a.app_password || a.password)).join('\n')
   } else {
@@ -1282,6 +1264,127 @@ async function startCampaignLocal(campaignId, campaign, contacts, database) {
   })
 
   return { success: true, totalJobs: contacts.length, smtpCount: servers.length, validSmtp: servers.length }
+}
+
+// ── Gmail API — local send (bypasses EC2 agent entirely) ─────────────────────
+
+async function startCampaignGmailLocal(campaignId) {
+  const database = db.get()
+
+  const campaign = database.prepare(`
+    SELECT c.*, t.html_body, t.subject, t.from_name, t.text_body,
+           COALESCE(t.attachments, '[]') as attachments
+    FROM campaigns c LEFT JOIN templates t ON c.template_id = t.id WHERE c.id = ?
+  `).get(campaignId)
+  if (!campaign) return { success: false, error: 'Campaign not found' }
+
+  const contacts = database.prepare("SELECT * FROM contacts WHERE list_id=? AND status='valid'").all(campaign.contact_list_id)
+  if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
+
+  const gmailRows = database.prepare("SELECT * FROM gmail_accounts WHERE status='authenticated'").all()
+  if (gmailRows.length === 0) return { success: false, error: 'No authenticated Gmail accounts. Authenticate accounts in Step 3 first.' }
+
+  database.prepare("UPDATE campaigns SET status='running', started_at=datetime('now'), total_recipients=?, sent_count=0, failed_count=0 WHERE id=?")
+    .run(contacts.length, campaignId)
+
+  runningCampaigns.set(campaignId, { paused: false, cancelled: false, mode: 'gmail_local' })
+
+  // Build one nodemailer transporter per account (OAuth2 — auto-refreshes token)
+  const transporters = gmailRows.map(a => ({
+    account: a,
+    transporter: nodemailer.createTransport({
+      host: 'smtp.gmail.com', port: 587, secure: false,
+      auth: {
+        type:         'OAuth2',
+        user:         a.email,
+        clientId:     a.client_id,
+        clientSecret: a.client_secret,
+        refreshToken: a.refresh_token,
+        accessToken:  a.access_token,
+      },
+    }),
+  }))
+
+  // Prepare attachments upfront
+  let preparedAttachments = []
+  try {
+    const rawAtts = JSON.parse(campaign.attachments || '[]')
+    preparedAttachments = await prepareAttachments(rawAtts)
+  } catch {}
+
+  console.log(`[Gmail] Starting local send: ${contacts.length} contacts, ${transporters.length} accounts`)
+
+  // Kick off async — IPC handler returns immediately
+  setImmediate(() => {
+    processGmailBatch(campaignId, campaign, contacts, transporters, preparedAttachments, database)
+      .catch(err => {
+        console.error('[Gmail] Fatal batch error:', err)
+        finalizeCampaign(campaignId)
+      })
+  })
+
+  return { success: true, totalJobs: contacts.length, mode: 'gmail_local' }
+}
+
+async function processGmailBatch(campaignId, campaign, contacts, transporters, preparedAttachments, database) {
+  const BATCH_SIZE  = 50
+  const BATCH_DELAY = 150
+  let sent = 0, failed = 0, tIdx = 0
+
+  for (let i = 0; i < contacts.length; i++) {
+    const state = runningCampaigns.get(campaignId)
+    if (!state || state.cancelled) { console.log('[Gmail] Campaign cancelled'); break }
+
+    const contact = contacts[i]
+    const recipientData = {
+      name:    contact.name      || contact.email.split('@')[0] || '',
+      email:   contact.email     || '',
+      address: contact.address   || '',
+      st:      contact.address   || '',
+      id:      contact.unique_id || '',
+    }
+
+    const html    = mergeTemplate(campaign.html_body, recipientData)
+    const subject = mergeTemplate(campaign.subject,   recipientData)
+    const { account, transporter } = transporters[tIdx % transporters.length]
+    tIdx++
+
+    try {
+      const mailOptions = {
+        from:    campaign.from_name ? `${campaign.from_name} <${account.email}>` : account.email,
+        to:      contact.email,
+        subject,
+        html,
+        text:    campaign.text_body || generateTextVersion(html),
+      }
+      if (preparedAttachments.length > 0) mailOptions.attachments = preparedAttachments
+      await transporter.sendMail(mailOptions)
+      sent++
+      database.prepare('UPDATE campaigns SET sent_count=? WHERE id=?').run(sent, campaignId)
+      console.log(`[Gmail] ✅ ${contact.email} via ${account.email}`)
+    } catch (err) {
+      failed++
+      database.prepare('UPDATE campaigns SET failed_count=? WHERE id=?').run(failed, campaignId)
+      console.log(`[Gmail] ❌ ${contact.email}: ${err.message}`)
+    }
+
+    BrowserWindow.getAllWindows().forEach(w => {
+      try {
+        w.webContents.send('sending:progress', {
+          campaignId, sent_count: sent, failed_count: failed,
+          total_recipients: contacts.length, open_count: 0, mode: 'gmail_local',
+        })
+      } catch {}
+    })
+
+    // Batch pause to respect Gmail rate limits (~500/day, ~20/min per account)
+    if ((i + 1) % BATCH_SIZE === 0) await sleep(BATCH_DELAY)
+    // Yield event loop every 10 emails
+    if (i % 10 === 9) await new Promise(r => setImmediate(r))
+  }
+
+  console.log(`[Gmail] Local send complete — sent: ${sent}, failed: ${failed}`)
+  finalizeCampaign(campaignId)
 }
 
 async function processBatch(campaignId) {

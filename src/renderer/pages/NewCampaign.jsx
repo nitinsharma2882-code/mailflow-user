@@ -348,7 +348,9 @@ function NewCampaign() {
         return
       }
       if (!scheduleOnly) {
-        const result = await window.api.sending.startCampaign(created.id)
+        const result = campaign.sending_mode === 'gmail_api'
+          ? await window.api.gmail.sendCampaign(created.id)
+          : await window.api.sending.startCampaign(created.id)
         if (!result) {
           addToast('No response from sending engine — check server logs', 'error')
           return
