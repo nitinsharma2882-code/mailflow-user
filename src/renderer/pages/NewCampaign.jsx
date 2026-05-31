@@ -35,6 +35,9 @@ function NewCampaign() {
   const [smtpResults, setSmtpResults]         = useState({ working: [], failed: [], timeout: [], quotaExceeded: [] })
   const [cloneBanner, setCloneBanner]         = useState(false)
 
+  // Gmail API state
+  const [gmailAccounts, setGmailAccounts] = useState([])
+
   useEffect(() => {
     Promise.all([
       window.api.contacts.getLists().then(setContactLists),
@@ -80,6 +83,8 @@ function NewCampaign() {
         console.log('[Mailflow] Campaign data pre-filled from resend')
       }
     })
+
+    window.api.gmail?.getAccounts().then(a => setGmailAccounts(a || [])).catch(() => {})
 
     const onSmtpProgress = ({ completed, total }) => {
       setSmtpProgress({ completed, total })
@@ -234,6 +239,13 @@ function NewCampaign() {
     console.log('[Mailflow] SMTP cleared')
   }
 
+  async function loadGmailAccounts() {
+    try {
+      const accounts = await window.api.gmail?.getAccounts()
+      setGmailAccounts(accounts || [])
+    } catch {}
+  }
+
   async function handleExportSmtp(type) {
     const accounts = type === 'working' ? smtpResults.working : smtpResults.failed
     await window.api.customSmtp.exportCsv({ accounts, filename: `${type}-smtp.csv` })
@@ -316,6 +328,9 @@ function NewCampaign() {
     if (campaign.sending_mode === 'aws_ses' && (!campaign.aws_access_key || !campaign.aws_secret_key || !campaign.aws_sender_email)) {
       addToast('Enter all AWS SES credentials', 'error'); return
     }
+    if (campaign.sending_mode === 'gmail_api' && !gmailAccounts.some(a => a.status === 'authenticated')) {
+      addToast('Add and authenticate at least one Gmail account first', 'error'); return
+    }
     setLaunching(true)
     try {
       const autoName = campaign.name || `Campaign ${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}`
@@ -368,6 +383,7 @@ function NewCampaign() {
       if (campaign.sending_mode === 'existing_server') return campaign.server_ids.length > 0
       if (campaign.sending_mode === 'custom_smtp') return campaign.custom_smtp_list?.length > 0
       if (campaign.sending_mode === 'aws_ses') return !!(campaign.aws_access_key && campaign.aws_secret_key && campaign.aws_region && campaign.aws_sender_email)
+      if (campaign.sending_mode === 'gmail_api') return gmailAccounts.filter(a => a.status === 'authenticated').length > 0
     }
     return true
   }
@@ -544,7 +560,7 @@ function NewCampaign() {
       {step === 3 && (
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Add SMTP / Server</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
             {/* Use Existing Server — disabled (v2) */}
             <div style={{
               border: '1px solid #E0E0E0',
@@ -601,6 +617,15 @@ function NewCampaign() {
                 Amazon Simple Email Service — Coming in Version 2
               </div>
             </div>
+
+            {/* Gmail API — active */}
+            <div onClick={() => { setCampaign(c => ({ ...c, sending_mode: 'gmail_api' })); loadGmailAccounts() }}
+              style={{ padding: '16px', borderRadius: 'var(--rad-l)', cursor: 'pointer',
+                border: campaign.sending_mode === 'gmail_api' ? '2px solid var(--pu)' : '2px solid var(--bdr)',
+                background: campaign.sending_mode === 'gmail_api' ? 'var(--pu-l)' : 'var(--bg2)' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>📬 Gmail API</div>
+              <div style={{ fontSize: 12, color: 'var(--txt2)' }}>OAuth2 multi-account · No app passwords needed</div>
+            </div>
           </div>
 
           {campaign.sending_mode === 'existing_server' && (
@@ -634,6 +659,14 @@ function NewCampaign() {
 
           {campaign.sending_mode === 'aws_ses' && (
             <AwsSesForm campaign={campaign} setCampaign={setCampaign} addToast={addToast} IS={IS} />
+          )}
+
+          {campaign.sending_mode === 'gmail_api' && (
+            <GmailApiManager
+              accounts={gmailAccounts}
+              onRefresh={loadGmailAccounts}
+              addToast={addToast}
+            />
           )}
 
           {campaign.sending_mode === 'custom_smtp' && (
@@ -778,6 +811,8 @@ function NewCampaign() {
                           ? campaign.custom_smtp_list[0]?.email
                           : campaign.sending_mode === 'aws_ses'
                           ? campaign.aws_sender_email || 'sender@example.com'
+                          : campaign.sending_mode === 'gmail_api'
+                          ? (gmailAccounts.find(a => a.status === 'authenticated')?.email || 'gmail@example.com')
                           : servers.find(s => campaign.server_ids.includes(s.id))?.from_email || 'sender@example.com'}
                       </span>
                     </div>
@@ -855,6 +890,8 @@ function NewCampaign() {
                   ? `Custom SMTP (${campaign.custom_smtp_list?.length || 0} accounts)`
                   : campaign.sending_mode === 'aws_ses'
                   ? `AWS SES (${campaign.aws_region || 'us-east-1'})`
+                  : campaign.sending_mode === 'gmail_api'
+                  ? `Gmail API (${gmailAccounts.filter(a => a.status === 'authenticated').length} account(s))`
                   : `${campaign.server_ids.length} server(s)`],
                 ['Schedule',        campaign.scheduled_at || 'Start immediately'],
                 ['Open Tracking',   'Coming in v2'],
@@ -883,8 +920,20 @@ function NewCampaign() {
           <div className={styles.checkList} style={{ marginBottom: 20 }}>
             <CheckItem ok={!!campaign.contact_list_id} text={selectedListInfo ? `${selectedListInfo.valid?.toLocaleString()} valid recipients · ${selectedListInfo.invalid?.toLocaleString()} invalid skipped` : 'No contact list'} />
             <CheckItem ok={!!campaign.template_id} text={selectedTemplate ? `Template: "${selectedTemplate.name}"` : 'No template selected'} />
-            <CheckItem ok={campaign.sending_mode === 'custom_smtp' ? campaign.custom_smtp_list?.length > 0 : campaign.sending_mode === 'aws_ses' ? !!(campaign.aws_access_key && campaign.aws_secret_key && campaign.aws_sender_email) : campaign.server_ids.length > 0}
-              text={campaign.sending_mode === 'custom_smtp' ? `${campaign.custom_smtp_list?.length || 0} SMTP accounts (round-robin)` : campaign.sending_mode === 'aws_ses' ? `AWS SES · ${campaign.aws_region || 'us-east-1'} · ${campaign.aws_sender_email || 'no sender set'}` : `${campaign.server_ids.length} server(s) selected`} />
+            <CheckItem
+              ok={
+                campaign.sending_mode === 'custom_smtp' ? campaign.custom_smtp_list?.length > 0
+                : campaign.sending_mode === 'aws_ses'   ? !!(campaign.aws_access_key && campaign.aws_secret_key && campaign.aws_sender_email)
+                : campaign.sending_mode === 'gmail_api' ? gmailAccounts.filter(a => a.status === 'authenticated').length > 0
+                : campaign.server_ids.length > 0
+              }
+              text={
+                campaign.sending_mode === 'custom_smtp' ? `${campaign.custom_smtp_list?.length || 0} SMTP accounts (round-robin)`
+                : campaign.sending_mode === 'aws_ses'   ? `AWS SES · ${campaign.aws_region || 'us-east-1'} · ${campaign.aws_sender_email || 'no sender set'}`
+                : campaign.sending_mode === 'gmail_api' ? `Gmail API · ${gmailAccounts.filter(a => a.status === 'authenticated').length} account(s) authenticated`
+                : `${campaign.server_ids.length} server(s) selected`
+              }
+            />
           </div>
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: testResults ? 12 : 0 }}>
@@ -1517,6 +1566,189 @@ function Step3Template({ templates, setTemplates, campaign, setCampaign, addToas
             style={{ padding: '7px 16px', background: 'var(--pu)', color: '#fff', border: 'none', borderRadius: 'var(--rad)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
             Continue →
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Gmail API Manager Component ───────────────────────────────────────────────
+function GmailApiManager({ accounts, onRefresh, addToast }) {
+  const [uploading,      setUploading]      = React.useState(false)
+  const [authenticating, setAuthenticating] = React.useState(null)
+  const [testing,        setTesting]        = React.useState(null)
+
+  const authenticated = accounts.filter(a => a.status === 'authenticated')
+
+  async function handleUploadCredentials() {
+    return new Promise((resolve) => {
+      const input = document.createElement('input')
+      input.type     = 'file'
+      input.accept   = '.json'
+      input.multiple = true
+      input.style.display = 'none'
+      document.body.appendChild(input)
+      input.onchange = async (e) => {
+        document.body.removeChild(input)
+        const files = Array.from(e.target.files || [])
+        if (!files.length) return resolve()
+        setUploading(true)
+        try {
+          const fileData = await Promise.all(files.map(async f => ({
+            filename: f.name,
+            content:  await f.text(),
+            email:    '',
+          })))
+          const result = await window.api.gmail.addAccounts(fileData)
+          if (result.success) {
+            addToast(`Added ${result.added.length} credential file(s)`, 'success')
+            onRefresh()
+          }
+        } catch (err) {
+          addToast('Error uploading credentials: ' + err.message, 'error')
+        } finally {
+          setUploading(false)
+          resolve()
+        }
+      }
+      input.oncancel = () => { try { document.body.removeChild(input) } catch {} resolve() }
+      input.click()
+    })
+  }
+
+  async function handleAuthenticate(accountId) {
+    setAuthenticating(accountId)
+    try {
+      addToast('Browser opening for Google sign-in...', 'success')
+      const result = await window.api.gmail.authenticate(accountId)
+      if (result.success) {
+        addToast('Account authenticated: ' + result.email, 'success')
+      } else {
+        addToast('Authentication failed: ' + result.error, 'error')
+      }
+    } catch (err) {
+      addToast('Authentication error: ' + err.message, 'error')
+    } finally {
+      setAuthenticating(null)
+      onRefresh()
+    }
+  }
+
+  async function handleTest(accountId) {
+    setTesting(accountId)
+    try {
+      const result = await window.api.gmail.testAccount(accountId)
+      if (result.success) addToast('Test email sent successfully!', 'success')
+      else addToast('Test failed: ' + result.error, 'error')
+    } catch (err) {
+      addToast('Test error: ' + err.message, 'error')
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  async function handleRemove(accountId) {
+    await window.api.gmail.removeAccount(accountId)
+    addToast('Account removed', 'success')
+    onRefresh()
+  }
+
+  function statusBadge(status) {
+    if (status === 'authenticated')  return { icon: '🟢', label: 'Ready',            color: 'var(--gr)' }
+    if (status === 'authenticating') return { icon: '🟡', label: 'Authenticating…',  color: '#F39C12' }
+    return                                  { icon: '🔴', label: 'Not Authenticated', color: 'var(--re)' }
+  }
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      {/* Instructions */}
+      <div style={{ background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', padding: '12px 16px', marginBottom: 16, fontSize: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>How to set up Gmail API OAuth2:</div>
+        <ol style={{ margin: 0, paddingLeft: 18, color: 'var(--txt2)', lineHeight: 1.9 }}>
+          <li>Go to <strong>Google Cloud Console</strong> → APIs &amp; Services → Credentials</li>
+          <li>Create an <strong>OAuth 2.0 Client ID</strong> (type: Desktop app)</li>
+          <li>Download the <strong>credentials.json</strong> file</li>
+          <li>Upload the JSON here, then click <strong>Authenticate</strong> to sign in with Google</li>
+        </ol>
+      </div>
+
+      {/* Header bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--txt2)' }}>
+          <strong style={{ color: authenticated.length > 0 ? 'var(--gr)' : 'var(--txt)' }}>{authenticated.length}</strong> of {accounts.length} account(s) authenticated and ready
+        </div>
+        <button onClick={handleUploadCredentials} disabled={uploading}
+          style={{ padding: '7px 16px', background: 'var(--pu)', color: '#fff', border: 'none', borderRadius: 'var(--rad)', fontSize: 12, fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer' }}>
+          {uploading ? 'Uploading…' : '📁 Upload Credentials JSON'}
+        </button>
+      </div>
+
+      {/* Account list or empty state */}
+      {accounts.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '28px', background: 'var(--bg2)', border: '2px dashed var(--bdr2)', borderRadius: 'var(--rad-l)' }}>
+          <div style={{ fontSize: 30, marginBottom: 8 }}>📬</div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>No Gmail accounts added yet</div>
+          <div style={{ fontSize: 12, color: 'var(--txt3)' }}>Upload your OAuth2 credentials JSON file to get started</div>
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', overflow: 'hidden', marginBottom: 12 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: 'var(--bg3)' }}>
+                {['#', 'Gmail Address', 'Status', 'Actions'].map(h => (
+                  <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--txt2)', borderBottom: '1px solid var(--bdr)', fontSize: 11 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((acc, i) => {
+                const badge = statusBadge(acc.status)
+                return (
+                  <tr key={acc.id} style={{ borderBottom: i < accounts.length - 1 ? '1px solid var(--bdr)' : 'none' }}>
+                    <td style={{ padding: '10px 14px', color: 'var(--txt3)', fontSize: 11 }}>{i + 1}</td>
+                    <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: 11 }}>
+                      {acc.email || <span style={{ color: 'var(--txt3)', fontFamily: 'var(--font)' }}>Authenticate to reveal email</span>}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <span style={{ color: badge.color, fontWeight: 600, fontSize: 11 }}>{badge.icon} {badge.label}</span>
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {acc.status !== 'authenticated' && (
+                          <button onClick={() => handleAuthenticate(acc.id)} disabled={!!authenticating}
+                            style={{ padding: '4px 10px', background: 'var(--pu)', color: '#fff', border: 'none', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: authenticating ? 'not-allowed' : 'pointer' }}>
+                            {authenticating === acc.id ? '⏳ Waiting…' : '🔐 Authenticate'}
+                          </button>
+                        )}
+                        {acc.status === 'authenticated' && (
+                          <>
+                            <button onClick={() => handleTest(acc.id)} disabled={testing === acc.id}
+                              style={{ padding: '4px 10px', background: 'none', border: '1px solid var(--gr)', borderRadius: 4, fontSize: 11, cursor: testing === acc.id ? 'not-allowed' : 'pointer', color: 'var(--gr)', fontWeight: 600 }}>
+                              {testing === acc.id ? '⏳' : '✉️ Test'}
+                            </button>
+                            <button onClick={() => handleAuthenticate(acc.id)} disabled={!!authenticating}
+                              style={{ padding: '4px 10px', background: 'none', border: '1px solid var(--bdr)', borderRadius: 4, fontSize: 11, cursor: authenticating ? 'not-allowed' : 'pointer', color: 'var(--txt2)' }}>
+                              🔄 Re-auth
+                            </button>
+                          </>
+                        )}
+                        <button onClick={() => handleRemove(acc.id)}
+                          style={{ padding: '4px 10px', background: 'none', border: '1px solid var(--re)', borderRadius: 4, fontSize: 11, cursor: 'pointer', color: 'var(--re)' }}>
+                          🗑
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {authenticated.length > 0 && (
+        <div style={{ background: 'var(--gr-l)', border: '1px solid var(--gr)', borderRadius: 'var(--rad)', padding: '10px 14px', fontSize: 12 }}>
+          ✅ {authenticated.length} Gmail account(s) ready · OAuth2 SMTP · True round-robin
         </div>
       )}
     </div>

@@ -148,6 +148,18 @@ function runMigrations() {
       value       TEXT,
       updated_at  TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS gmail_accounts (
+      id           TEXT PRIMARY KEY,
+      email        TEXT,
+      client_id    TEXT,
+      client_secret TEXT,
+      project_id   TEXT,
+      access_token  TEXT,
+      refresh_token TEXT,
+      token_expiry  INTEGER,
+      status        TEXT DEFAULT 'pending',
+      created_at    TEXT DEFAULT (datetime('now'))
+    );
     INSERT OR IGNORE INTO app_settings (key, value) VALUES
       ('tracking_domain', 'track.mailflow.io'),
       ('open_tracking', 'true'),

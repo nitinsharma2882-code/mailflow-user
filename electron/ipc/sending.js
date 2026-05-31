@@ -463,6 +463,209 @@ function registerSendingHandlers() {
     }
   })
 
+  // ── Gmail API handlers ────────────────────────────────────────────────────
+
+  ipcMain.handle('gmail:addAccounts', async (_, credentialFiles) => {
+    const database = db.get()
+    const added = []
+    for (const file of credentialFiles) {
+      try {
+        const creds  = JSON.parse(file.content)
+        const cfg    = creds.installed || creds.web || creds
+        const clientId     = cfg.client_id     || ''
+        const clientSecret = cfg.client_secret || ''
+        const projectId    = cfg.project_id    || creds.project_id || ''
+        if (!clientId || !clientSecret) continue
+        const existing = database.prepare('SELECT id FROM gmail_accounts WHERE client_id = ?').get(clientId)
+        if (existing) {
+          database.prepare('UPDATE gmail_accounts SET client_secret=?, project_id=? WHERE id=?')
+            .run(clientSecret, projectId, existing.id)
+          added.push({ id: existing.id, email: '', status: 'pending' })
+        } else {
+          const id = uuid()
+          database.prepare(
+            'INSERT INTO gmail_accounts (id, email, client_id, client_secret, project_id, status) VALUES (?,?,?,?,?,?)'
+          ).run(id, '', clientId, clientSecret, projectId, 'pending')
+          added.push({ id, email: '', status: 'pending' })
+        }
+      } catch (err) {
+        console.log('[Gmail] Failed to parse credentials file:', file.filename, err.message)
+      }
+    }
+    return { success: true, added }
+  })
+
+  ipcMain.handle('gmail:getAccounts', async () => {
+    const database = db.get()
+    try {
+      return database.prepare(
+        'SELECT id, email, client_id, project_id, status, token_expiry, created_at FROM gmail_accounts ORDER BY created_at DESC'
+      ).all()
+    } catch { return [] }
+  })
+
+  ipcMain.handle('gmail:authenticate', async (_, accountId) => {
+    const { shell } = require('electron')
+    const database  = db.get()
+    const account   = database.prepare('SELECT * FROM gmail_accounts WHERE id = ?').get(accountId)
+    if (!account) return { success: false, error: 'Account not found' }
+
+    const REDIRECT_URI = 'http://localhost:8765/callback'
+    const SCOPE        = 'https://www.googleapis.com/auth/gmail.send'
+
+    const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + [
+      'client_id='     + encodeURIComponent(account.client_id),
+      'redirect_uri='  + encodeURIComponent(REDIRECT_URI),
+      'response_type=code',
+      'scope='         + encodeURIComponent(SCOPE),
+      'access_type=offline',
+      'prompt=consent',
+    ].join('&')
+
+    database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('authenticating', accountId)
+    shell.openExternal(authUrl)
+
+    // Start local callback server and wait for OAuth code
+    let code
+    try {
+      code = await new Promise((resolve, reject) => {
+        const server = http.createServer((req, res) => {
+          const urlObj = new URL(req.url, 'http://localhost:8765')
+          if (urlObj.pathname !== '/callback') { res.writeHead(404); res.end(); return }
+          const oauthCode  = urlObj.searchParams.get('code')
+          const oauthError = urlObj.searchParams.get('error')
+          res.writeHead(200, { 'Content-Type': 'text/html' })
+          if (oauthCode) {
+            res.end('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Authentication successful! You can close this window.</h2></body></html>')
+            server.close()
+            resolve(oauthCode)
+          } else {
+            res.end('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Authentication failed: ' + (oauthError || 'unknown') + '</h2></body></html>')
+            server.close()
+            reject(new Error('OAuth error: ' + (oauthError || 'unknown')))
+          }
+        })
+        server.on('error', reject)
+        server.listen(8765, 'localhost', () => {
+          console.log('[Gmail OAuth] Callback server listening on port 8765')
+        })
+        setTimeout(() => { server.close(); reject(new Error('Authentication timed out after 5 minutes')) }, 300000)
+      })
+    } catch (err) {
+      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+      return { success: false, error: err.message }
+    }
+
+    // Exchange code for tokens
+    const tokenBody = [
+      'code='          + encodeURIComponent(code),
+      'client_id='     + encodeURIComponent(account.client_id),
+      'client_secret=' + encodeURIComponent(account.client_secret),
+      'redirect_uri='  + encodeURIComponent(REDIRECT_URI),
+      'grant_type=authorization_code',
+    ].join('&')
+
+    let tokenRes
+    try {
+      tokenRes = await new Promise((resolve, reject) => {
+        const options = {
+          hostname: 'oauth2.googleapis.com',
+          port: 443, path: '/token', method: 'POST',
+          headers: {
+            'Content-Type':   'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(tokenBody),
+          },
+        }
+        const req = https.request(options, (res) => {
+          let data = ''
+          res.on('data', chunk => data += chunk)
+          res.on('end', () => { try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid token response')) } })
+        })
+        req.on('error', reject)
+        req.write(tokenBody)
+        req.end()
+      })
+    } catch (err) {
+      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+      return { success: false, error: 'Token exchange failed: ' + err.message }
+    }
+
+    if (tokenRes.error) {
+      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+      return { success: false, error: tokenRes.error_description || tokenRes.error }
+    }
+
+    // Fetch user's email from Google userinfo
+    let userEmail = account.email || ''
+    try {
+      const infoRes = await new Promise((resolve, reject) => {
+        const req = https.request({
+          hostname: 'www.googleapis.com', port: 443,
+          path: '/oauth2/v2/userinfo', method: 'GET',
+          headers: { 'Authorization': 'Bearer ' + tokenRes.access_token },
+        }, (res) => {
+          let data = ''
+          res.on('data', chunk => data += chunk)
+          res.on('end', () => { try { resolve(JSON.parse(data)) } catch { resolve({}) } })
+        })
+        req.on('error', () => resolve({}))
+        req.end()
+      })
+      userEmail = infoRes.email || userEmail
+    } catch {}
+
+    const expiry = Date.now() + (tokenRes.expires_in || 3600) * 1000
+    database.prepare(
+      'UPDATE gmail_accounts SET access_token=?, refresh_token=?, token_expiry=?, status=?, email=? WHERE id=?'
+    ).run(
+      tokenRes.access_token,
+      tokenRes.refresh_token || account.refresh_token || null,
+      expiry,
+      'authenticated',
+      userEmail,
+      accountId
+    )
+
+    console.log('[Gmail] Authenticated:', userEmail)
+    return { success: true, email: userEmail }
+  })
+
+  ipcMain.handle('gmail:removeAccount', async (_, accountId) => {
+    db.get().prepare('DELETE FROM gmail_accounts WHERE id=?').run(accountId)
+    return { success: true }
+  })
+
+  ipcMain.handle('gmail:testAccount', async (_, accountId) => {
+    const database = db.get()
+    const account  = database.prepare('SELECT * FROM gmail_accounts WHERE id=?').get(accountId)
+    if (!account)              return { success: false, error: 'Account not found' }
+    if (!account.access_token) return { success: false, error: 'Account not authenticated yet' }
+    try {
+      const transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com', port: 465, secure: true,
+        auth: {
+          type:         'OAuth2',
+          user:         account.email,
+          accessToken:  account.access_token,
+          refreshToken: account.refresh_token,
+          expires:      account.token_expiry,
+          clientId:     account.client_id,
+          clientSecret: account.client_secret,
+        },
+      })
+      await transporter.sendMail({
+        from:    account.email,
+        to:      account.email,
+        subject: '[Mailflow] Gmail OAuth2 Test',
+        html:    '<p>Gmail API connection test successful from Mailflow!</p>',
+      })
+      transporter.close()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('sending:runTestCampaign', async (_, campaignData) => {
     const { subject, fromName, html, sendMode, serverId, smtpEmail, smtpPass, awsKey, awsSecret, awsRegion, awsFrom, csvAccounts } = campaignData
     const database = db.get()
@@ -725,7 +928,28 @@ async function startCampaignViaAgent(campaignId, campaign, contacts, instance) {
   let customSmtpList = []
   try { customSmtpList = JSON.parse(campaign.custom_smtp_list || '[]') } catch {}
 
-  if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
+  if (sending_mode === 'gmail_api') {
+    const gmailRows = database.prepare("SELECT * FROM gmail_accounts WHERE status = 'authenticated'").all()
+    if (gmailRows.length === 0) {
+      return { success: false, error: 'No authenticated Gmail accounts found. Go back to Step 3 and authenticate your Gmail accounts first.' }
+    }
+    smtpList = gmailRows.map(a => ({
+      email:  a.email,
+      host:   'smtp.gmail.com',
+      port:   465,
+      secure: true,
+      auth: {
+        type:         'OAuth2',
+        user:         a.email,
+        accessToken:  a.access_token,
+        refreshToken: a.refresh_token,
+        expires:      a.token_expiry,
+        clientId:     a.client_id,
+        clientSecret: a.client_secret,
+      },
+    }))
+    console.log(`[Mailflow] Gmail API mode — ${gmailRows.length} authenticated account(s)`)
+  } else if (sending_mode === 'custom_smtp' && customSmtpList.length > 0) {
     const validAccounts = customSmtpList.filter(a => a.email && (a.app_password || a.password) && a.working !== false)
     smtpCsv = validAccounts.map(a => a.email + ',' + (a.app_password || a.password)).join('\n')
   } else {

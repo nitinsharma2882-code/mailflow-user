@@ -118,6 +118,15 @@ contextBridge.exposeInMainWorld('api', {
     exportCsv: (data)      => ipcRenderer.invoke('customSmtp:exportCsv', data),
   },
 
+  // Gmail API (OAuth2 multi-account)
+  gmail: {
+    addAccounts:   (files) => ipcRenderer.invoke('gmail:addAccounts', files),
+    getAccounts:   ()      => ipcRenderer.invoke('gmail:getAccounts'),
+    authenticate:  (id)    => ipcRenderer.invoke('gmail:authenticate', id),
+    removeAccount: (id)    => ipcRenderer.invoke('gmail:removeAccount', id),
+    testAccount:   (id)    => ipcRenderer.invoke('gmail:testAccount', id),
+  },
+
   // License
   license: {
     check:          ()                          => ipcRenderer.invoke('license:check'),
