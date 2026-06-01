@@ -626,7 +626,7 @@ function registerSendingHandlers() {
       accountId
     )
 
-    console.log('[Gmail] Authenticated:', userEmail)
+    console.log('[Gmail] Authenticated:', userEmail, 'refresh_token:', !!tokenRes.refresh_token)
     return { success: true, email: userEmail }
   })
 
@@ -640,6 +640,7 @@ function registerSendingHandlers() {
     const account  = database.prepare('SELECT * FROM gmail_accounts WHERE id=?').get(accountId)
     if (!account)              return { success: false, error: 'Account not found' }
     if (!account.access_token) return { success: false, error: 'Account not authenticated yet' }
+    if (!account.email)        return { success: false, error: 'Email not set — please re-authenticate' }
     try {
       const transporter = nodemailer.createTransport({
         host: 'smtp.gmail.com', port: 587, secure: false,
@@ -1282,6 +1283,14 @@ async function startCampaignGmailLocal(campaignId) {
   if (contacts.length === 0) return { success: false, error: 'No valid contacts' }
 
   const gmailRows = database.prepare("SELECT * FROM gmail_accounts WHERE status='authenticated'").all()
+  console.log('[Gmail] Accounts from DB:', JSON.stringify(gmailRows.map(a => ({
+    id:              a.id,
+    email:           a.email,
+    status:          a.status,
+    hasAccessToken:  !!a.access_token,
+    hasRefreshToken: !!a.refresh_token,
+    clientId:        a.client_id ? a.client_id.substring(0, 20) + '...' : null,
+  }))))
   if (gmailRows.length === 0) return { success: false, error: 'No authenticated Gmail accounts. Authenticate accounts in Step 3 first.' }
 
   database.prepare("UPDATE campaigns SET status='running', started_at=datetime('now'), total_recipients=?, sent_count=0, failed_count=0 WHERE id=?")
