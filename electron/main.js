@@ -46,7 +46,7 @@ function createWindow() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self'; " +
-          "connect-src 'self' https://mailflow-tracking-server-production.up.railway.app http://localhost:3001; " +
+          "connect-src 'self' https://mailflow-license-server-production.up.railway.app https://mailflow-tracking-server-production.up.railway.app https://*.railway.app http://localhost:3001; " +
           "script-src 'self' 'unsafe-inline'; " +
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
           "img-src 'self' data: https: http://localhost:3001; " +
