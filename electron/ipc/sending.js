@@ -511,7 +511,7 @@ function registerSendingHandlers() {
     if (!account) return { success: false, error: 'Account not found' }
 
     const REDIRECT_URI = 'http://localhost:8765/callback'
-    const SCOPE        = 'https://www.googleapis.com/auth/gmail.send'
+    const SCOPE        = 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email'
 
     const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + [
       'client_id='     + encodeURIComponent(account.client_id),
