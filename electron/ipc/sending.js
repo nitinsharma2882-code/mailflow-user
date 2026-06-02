@@ -595,24 +595,39 @@ function registerSendingHandlers() {
       return { success: false, error: tokenRes.error_description || tokenRes.error }
     }
 
-    // Fetch user's email from Google userinfo
+    // Fetch user's email — three fallbacks in order
     let userEmail = account.email || ''
+
+    // 1. userinfo endpoint
     try {
-      const infoRes = await new Promise((resolve, reject) => {
-        const req = https.request({
-          hostname: 'www.googleapis.com', port: 443,
-          path: '/oauth2/v2/userinfo', method: 'GET',
-          headers: { 'Authorization': 'Bearer ' + tokenRes.access_token },
-        }, (res) => {
-          let data = ''
-          res.on('data', chunk => data += chunk)
-          res.on('end', () => { try { resolve(JSON.parse(data)) } catch { resolve({}) } })
-        })
-        req.on('error', () => resolve({}))
-        req.end()
+      const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: 'Bearer ' + tokenRes.access_token },
       })
-      userEmail = infoRes.email || userEmail
+      const userinfo = await userinfoRes.json()
+      userEmail = userinfo.email || userEmail
     } catch {}
+
+    // 2. Gmail profile endpoint (fallback if userinfo returned no email)
+    if (!userEmail) {
+      try {
+        const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+          headers: { Authorization: 'Bearer ' + tokenRes.access_token },
+        })
+        const profile = await profileRes.json()
+        userEmail = profile.emailAddress || ''
+      } catch {}
+    }
+
+    // 3. Decode id_token JWT payload (last resort)
+    if (!userEmail && tokenRes.id_token) {
+      try {
+        const parts   = tokenRes.id_token.split('.')
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
+        userEmail = payload.email || ''
+      } catch {}
+    }
+
+    console.log('[Gmail Auth] Resolved email:', userEmail)
 
     const expiry = Date.now() + (tokenRes.expires_in || 3600) * 1000
     database.prepare(
@@ -1299,20 +1314,29 @@ async function startCampaignGmailLocal(campaignId) {
   runningCampaigns.set(campaignId, { paused: false, cancelled: false, mode: 'gmail_local' })
 
   // Build one nodemailer transporter per account (OAuth2 — auto-refreshes token)
-  const transporters = gmailRows.map(a => ({
-    account: a,
-    transporter: nodemailer.createTransport({
-      host: 'smtp.gmail.com', port: 587, secure: false,
-      auth: {
-        type:         'OAuth2',
-        user:         a.email,
-        clientId:     a.client_id,
-        clientSecret: a.client_secret,
-        refreshToken: a.refresh_token,
-        accessToken:  a.access_token,
-      },
-    }),
-  }))
+  // Skip accounts missing an email address (they need re-authentication)
+  const transporters = gmailRows
+    .filter(a => {
+      if (!a.email || a.email.trim() === '') {
+        console.log('[Gmail] Skipping account - no email address stored, please re-authenticate')
+        return false
+      }
+      return true
+    })
+    .map(a => ({
+      account: a,
+      transporter: nodemailer.createTransport({
+        host: 'smtp.gmail.com', port: 587, secure: false,
+        auth: {
+          type:         'OAuth2',
+          user:         a.email,
+          clientId:     a.client_id,
+          clientSecret: a.client_secret,
+          refreshToken: a.refresh_token,
+          accessToken:  a.access_token,
+        },
+      }),
+    }))
 
   // Prepare attachments upfront
   let preparedAttachments = []
