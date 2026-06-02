@@ -595,53 +595,64 @@ function registerSendingHandlers() {
       return { success: false, error: tokenRes.error_description || tokenRes.error }
     }
 
-    // Fetch user's email — three fallbacks in order
-    let userEmail = account.email || ''
-
-    // 1. userinfo endpoint
+    // Try to get email from userinfo
+    let userEmail = ''
     try {
       const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: { Authorization: 'Bearer ' + tokenRes.access_token },
+        headers: { 'Authorization': 'Bearer ' + tokenRes.access_token }
       })
-      const userinfo = await userinfoRes.json()
-      userEmail = userinfo.email || userEmail
-    } catch {}
+      const userinfoText = await userinfoRes.text()
+      console.log('[Gmail Auth] Userinfo raw response:', userinfoText)
+      const userinfo = JSON.parse(userinfoText)
+      userEmail = userinfo.email || ''
+      console.log('[Gmail Auth] Email from userinfo:', userEmail)
+    } catch(e) {
+      console.log('[Gmail Auth] Userinfo fetch failed:', e.message)
+    }
 
-    // 2. Gmail profile endpoint (fallback if userinfo returned no email)
+    // Fallback: Gmail profile
     if (!userEmail) {
       try {
         const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-          headers: { Authorization: 'Bearer ' + tokenRes.access_token },
+          headers: { 'Authorization': 'Bearer ' + tokenRes.access_token }
         })
-        const profile = await profileRes.json()
+        const profileText = await profileRes.text()
+        console.log('[Gmail Auth] Profile raw response:', profileText)
+        const profile = JSON.parse(profileText)
         userEmail = profile.emailAddress || ''
-      } catch {}
+        console.log('[Gmail Auth] Email from profile:', userEmail)
+      } catch(e) {
+        console.log('[Gmail Auth] Profile fetch failed:', e.message)
+      }
     }
 
-    // 3. Decode id_token JWT payload (last resort)
+    // Fallback: decode id_token
     if (!userEmail && tokenRes.id_token) {
       try {
-        const parts   = tokenRes.id_token.split('.')
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
+        const parts = tokenRes.id_token.split('.')
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
         userEmail = payload.email || ''
-      } catch {}
+        console.log('[Gmail Auth] Email from id_token:', userEmail)
+      } catch(e) {
+        console.log('[Gmail Auth] id_token decode failed:', e.message)
+      }
     }
 
-    console.log('[Gmail Auth] Resolved email:', userEmail)
+    console.log('[Gmail Auth] Final email:', userEmail)
 
-    const expiry = Date.now() + (tokenRes.expires_in || 3600) * 1000
+    // Save to DB even if email is empty — we'll show a warning
     database.prepare(
       'UPDATE gmail_accounts SET access_token=?, refresh_token=?, token_expiry=?, status=?, email=? WHERE id=?'
     ).run(
       tokenRes.access_token,
-      tokenRes.refresh_token || account.refresh_token || null,
-      expiry,
+      tokenRes.refresh_token || null,
+      Date.now() + (tokenRes.expires_in || 3600) * 1000,
       'authenticated',
       userEmail,
       accountId
     )
 
-    console.log('[Gmail] Authenticated:', userEmail, 'refresh_token:', !!tokenRes.refresh_token)
+    console.log('[Gmail Auth] Saved account. Email:', userEmail || 'EMPTY - check logs above')
     return { success: true, email: userEmail }
   })
 
