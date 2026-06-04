@@ -1293,6 +1293,81 @@ async function startCampaignLocal(campaignId, campaign, contacts, database) {
   return { success: true, totalJobs: contacts.length, smtpCount: servers.length, validSmtp: servers.length }
 }
 
+// ── Gmail API helpers ─────────────────────────────────────────────────────────
+
+async function refreshGmailToken(account, database) {
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     account.client_id,
+        client_secret: account.client_secret,
+        refresh_token: account.refresh_token,
+        grant_type:    'refresh_token',
+      }).toString(),
+    })
+    const data = await res.json()
+    if (data.access_token) {
+      const newExpiry = Date.now() + (data.expires_in || 3600) * 1000
+      database.prepare('UPDATE gmail_accounts SET access_token=?, token_expiry=? WHERE id=?')
+        .run(data.access_token, newExpiry, account.id)
+      account.access_token = data.access_token
+      account.token_expiry = newExpiry
+      console.log('[Gmail] Token refreshed for:', account.email)
+    }
+  } catch(e) {
+    console.log('[Gmail] Token refresh error:', e.message)
+  }
+  return account
+}
+
+async function sendViaGmailAPI(accessToken, mailOptions) {
+  const boundary = 'boundary_' + Date.now()
+  let rawEmail = ''
+  rawEmail += 'From: ' + mailOptions.from + '\r\n'
+  rawEmail += 'To: ' + mailOptions.to + '\r\n'
+  rawEmail += 'Subject: =?utf-8?B?' + Buffer.from(mailOptions.subject).toString('base64') + '?=\r\n'
+  rawEmail += 'MIME-Version: 1.0\r\n'
+
+  if (mailOptions.attachments && mailOptions.attachments.length > 0) {
+    rawEmail += 'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n\r\n'
+    rawEmail += '--' + boundary + '\r\n'
+    rawEmail += 'Content-Type: text/html; charset=utf-8\r\n\r\n'
+    rawEmail += mailOptions.html + '\r\n\r\n'
+    for (const att of mailOptions.attachments) {
+      rawEmail += '--' + boundary + '\r\n'
+      rawEmail += 'Content-Type: ' + (att.contentType || 'application/octet-stream') + '\r\n'
+      rawEmail += 'Content-Transfer-Encoding: base64\r\n'
+      rawEmail += 'Content-Disposition: attachment; filename="' + att.filename + '"\r\n\r\n'
+      rawEmail += (typeof att.content === 'string' ? att.content : att.content.toString('base64')) + '\r\n\r\n'
+    }
+    rawEmail += '--' + boundary + '--'
+  } else {
+    rawEmail += 'Content-Type: text/html; charset=utf-8\r\n\r\n'
+    rawEmail += mailOptions.html
+  }
+
+  const encoded = Buffer.from(rawEmail)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({ raw: encoded }),
+  })
+
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+  return data
+}
+
 // ── Gmail API — local send (bypasses EC2 agent entirely) ─────────────────────
 
 async function startCampaignGmailLocal(campaignId) {
@@ -1324,30 +1399,17 @@ async function startCampaignGmailLocal(campaignId) {
 
   runningCampaigns.set(campaignId, { paused: false, cancelled: false, mode: 'gmail_local' })
 
-  // Build one nodemailer transporter per account (OAuth2 — auto-refreshes token)
-  // Skip accounts missing an email address (they need re-authentication)
-  const transporters = gmailRows
-    .filter(a => {
-      if (!a.email || a.email.trim() === '') {
-        console.log('[Gmail] Skipping account - no email address stored, please re-authenticate')
-        return false
-      }
-      return true
-    })
-    .map(a => ({
-      account: a,
-      transporter: nodemailer.createTransport({
-        host: 'smtp.gmail.com', port: 587, secure: false,
-        auth: {
-          type:         'OAuth2',
-          user:         a.email,
-          clientId:     a.client_id,
-          clientSecret: a.client_secret,
-          refreshToken: a.refresh_token,
-          accessToken:  a.access_token,
-        },
-      }),
-    }))
+  // Filter out accounts with no email (need re-auth before sending)
+  const gmailAccounts = gmailRows.filter(a => {
+    if (!a.email || a.email.trim() === '') {
+      console.log('[Gmail] Skipping account - no email stored, please re-authenticate')
+      return false
+    }
+    return true
+  })
+  if (gmailAccounts.length === 0) {
+    return { success: false, error: 'All Gmail accounts missing email — please re-authenticate each account.' }
+  }
 
   // Prepare attachments upfront
   let preparedAttachments = []
@@ -1356,11 +1418,11 @@ async function startCampaignGmailLocal(campaignId) {
     preparedAttachments = await prepareAttachments(rawAtts)
   } catch {}
 
-  console.log(`[Gmail] Starting local send: ${contacts.length} contacts, ${transporters.length} accounts`)
+  console.log(`[Gmail] Starting HTTP API send: ${contacts.length} contacts, ${gmailAccounts.length} accounts`)
 
   // Kick off async — IPC handler returns immediately
   setImmediate(() => {
-    processGmailBatch(campaignId, campaign, contacts, transporters, preparedAttachments, database)
+    processGmailBatch(campaignId, campaign, contacts, gmailAccounts, preparedAttachments, database)
       .catch(err => {
         console.error('[Gmail] Fatal batch error:', err)
         finalizeCampaign(campaignId)
@@ -1370,7 +1432,7 @@ async function startCampaignGmailLocal(campaignId) {
   return { success: true, totalJobs: contacts.length, mode: 'gmail_local' }
 }
 
-async function processGmailBatch(campaignId, campaign, contacts, transporters, preparedAttachments, database) {
+async function processGmailBatch(campaignId, campaign, contacts, gmailAccounts, preparedAttachments, database) {
   const BATCH_SIZE  = 50
   const BATCH_DELAY = 150
   let sent = 0, failed = 0, tIdx = 0
@@ -1390,19 +1452,23 @@ async function processGmailBatch(campaignId, campaign, contacts, transporters, p
 
     const html    = mergeTemplate(campaign.html_body, recipientData)
     const subject = mergeTemplate(campaign.subject,   recipientData)
-    const { account, transporter } = transporters[tIdx % transporters.length]
+    const account = gmailAccounts[tIdx % gmailAccounts.length]
     tIdx++
 
     try {
+      // Refresh token if expired or expiring within 60s
+      if (!account.token_expiry || Date.now() > account.token_expiry - 60000) {
+        await refreshGmailToken(account, database)
+      }
+
       const mailOptions = {
         from:    campaign.from_name ? `${campaign.from_name} <${account.email}>` : account.email,
         to:      contact.email,
         subject,
         html,
-        text:    campaign.text_body || generateTextVersion(html),
       }
       if (preparedAttachments.length > 0) mailOptions.attachments = preparedAttachments
-      await transporter.sendMail(mailOptions)
+      await sendViaGmailAPI(account.access_token, mailOptions)
       sent++
       database.prepare('UPDATE campaigns SET sent_count=? WHERE id=?').run(sent, campaignId)
       console.log(`[Gmail] ✅ ${contact.email} via ${account.email}`)
