@@ -696,6 +696,26 @@ function registerSendingHandlers() {
     return startCampaignGmailLocal(campaignId)
   })
 
+  ipcMain.handle('gmail:sendCampaignForPage', async (_, pageData) => {
+    const { licenseKey, contacts, subject, fromName, htmlBody, attachments, gmailAccountId } = pageData || {}
+    if (!gmailAccountId) return { success: false, error: 'gmailAccountId required' }
+    if (!contacts || !contacts.length) return { success: false, error: 'No contacts provided' }
+    const key = licenseKey || global._mailflowLicenseKey || ''
+    if (!key) return { success: false, error: 'License key not available' }
+    try {
+      const res  = await httpRequest(
+        'https://mailflow-license-server-production.up.railway.app/api/user/gmail-pool/send',
+        'POST',
+        { licenseKey: key, accountIds: [gmailAccountId], jobData: { contacts, subject, fromName, htmlBody, attachments: attachments || [] } }
+      )
+      const data = res.json()
+      if (!res.ok || !data.jobId) return { success: false, error: data.error || 'Failed to start pool send' }
+      return { success: true, jobId: data.jobId, total: data.total || contacts.length }
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('sending:runTestCampaign', async (_, campaignData) => {
     const { subject, fromName, html, sendMode, serverId, smtpEmail, smtpPass, awsKey, awsSecret, awsRegion, awsFrom, csvAccounts } = campaignData
     const database = db.get()
