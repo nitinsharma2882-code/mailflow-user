@@ -34,8 +34,9 @@ const NAV = [
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: IconGrid },
       { id: 'campaigns', label: 'Campaigns', icon: IconList, badge: null },
-      { id: 'new-campaign',  label: 'New campaign',  icon: IconPlus },
-      { id: 'test-campaign', label: 'Test Campaign', icon: IconCheck },
+      { id: 'new-campaign',  label: 'New campaign',   icon: IconPlus },
+      { id: 'api-campaign',  label: 'API Campaign',   icon: IconBolt },
+      { id: 'test-campaign', label: 'Test Campaign',  icon: IconCheck },
     ]
   },
   {
@@ -205,6 +206,11 @@ function IconShield({ size = 16 }) {
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor">
     <path d="M8 1.5L2 4.5v5C2 13 4.8 15.5 8 16.5c3.2-1 6-3.5 6-7v-5L8 1.5z" stroke="currentColor" strokeWidth="1.2" fill="none"/>
     <path d="M5.5 8.5l2 2 3-3.5" stroke="currentColor" strokeWidth="1.3" fill="none"/>
+  </svg>
+}
+function IconBolt({ size = 16 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor">
+    <path d="M9.5 1L3 9h6l-2.5 6L14 7H8L9.5 1z"/>
   </svg>
 }
 function IconCheck({ size = 16 }) {

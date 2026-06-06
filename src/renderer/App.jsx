@@ -15,6 +15,7 @@ import { useAppStore } from './store/useAppStore'
 
 const TestCampaign   = React.lazy(() => import('./pages/TestCampaign'))
 const MultiCampaign  = React.lazy(() => import('./pages/MultiCampaign'))
+const ApiCampaign    = React.lazy(() => import('./pages/ApiCampaign'))
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -70,6 +71,7 @@ const PAGES = {
   smtp:            SmtpTester,
   'test-campaign':   TestCampaign,
   'multi-campaign':  MultiCampaign,
+  'api-campaign':    ApiCampaign,
 }
 
 export default function App() {
