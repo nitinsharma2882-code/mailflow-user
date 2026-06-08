@@ -523,137 +523,141 @@ function registerSendingHandlers() {
     ].join('&')
 
     database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('authenticating', accountId)
-    shell.openExternal(authUrl)
 
-    // Start local callback server and wait for OAuth code
-    let code
-    try {
-      code = await new Promise((resolve, reject) => {
-        const server = http.createServer((req, res) => {
-          const urlObj = new URL(req.url, 'http://localhost:8765')
-          if (urlObj.pathname !== '/callback') { res.writeHead(404); res.end(); return }
-          const oauthCode  = urlObj.searchParams.get('code')
-          const oauthError = urlObj.searchParams.get('error')
-          res.writeHead(200, { 'Content-Type': 'text/html' })
-          if (oauthCode) {
-            res.end('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Authentication successful! You can close this window.</h2></body></html>')
-            server.close()
-            resolve(oauthCode)
-          } else {
-            res.end('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Authentication failed: ' + (oauthError || 'unknown') + '</h2></body></html>')
-            server.close()
-            reject(new Error('OAuth error: ' + (oauthError || 'unknown')))
-          }
-        })
-        server.on('error', reject)
-        server.listen(8765, 'localhost', () => {
-          console.log('[Gmail OAuth] Callback server listening on port 8765')
-        })
-        setTimeout(() => { server.close(); reject(new Error('Authentication timed out after 5 minutes')) }, 300000)
-      })
-    } catch (err) {
-      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
-      return { success: false, error: err.message }
-    }
-
-    // Exchange code for tokens
-    const tokenBody = [
-      'code='          + encodeURIComponent(code),
-      'client_id='     + encodeURIComponent(account.client_id),
-      'client_secret=' + encodeURIComponent(account.client_secret),
-      'redirect_uri='  + encodeURIComponent(REDIRECT_URI),
-      'grant_type=authorization_code',
-    ].join('&')
-
-    let tokenRes
-    try {
-      tokenRes = await new Promise((resolve, reject) => {
-        const options = {
-          hostname: 'oauth2.googleapis.com',
-          port: 443, path: '/token', method: 'POST',
-          headers: {
-            'Content-Type':   'application/x-www-form-urlencoded',
-            'Content-Length': Buffer.byteLength(tokenBody),
-          },
-        }
-        const req = https.request(options, (res) => {
-          let data = ''
-          res.on('data', chunk => data += chunk)
-          res.on('end', () => { try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid token response')) } })
-        })
-        req.on('error', reject)
-        req.write(tokenBody)
-        req.end()
-      })
-    } catch (err) {
-      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
-      return { success: false, error: 'Token exchange failed: ' + err.message }
-    }
-
-    if (tokenRes.error) {
-      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
-      return { success: false, error: tokenRes.error_description || tokenRes.error }
-    }
-
-    // Try to get email from userinfo
-    let userEmail = ''
-    try {
-      const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: { 'Authorization': 'Bearer ' + tokenRes.access_token }
-      })
-      const userinfoText = await userinfoRes.text()
-      console.log('[Gmail Auth] Userinfo raw response:', userinfoText)
-      const userinfo = JSON.parse(userinfoText)
-      userEmail = userinfo.email || ''
-      console.log('[Gmail Auth] Email from userinfo:', userEmail)
-    } catch(e) {
-      console.log('[Gmail Auth] Userinfo fetch failed:', e.message)
-    }
-
-    // Fallback: Gmail profile
-    if (!userEmail) {
+    // Start callback server in background — renderer shows authUrl to user
+    ;(async () => {
+      let code
       try {
-        const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+        code = await new Promise((resolve, reject) => {
+          const server = http.createServer((req, res) => {
+            const urlObj = new URL(req.url, 'http://localhost:8765')
+            if (urlObj.pathname !== '/callback') { res.writeHead(404); res.end(); return }
+            const oauthCode  = urlObj.searchParams.get('code')
+            const oauthError = urlObj.searchParams.get('error')
+            res.writeHead(200, { 'Content-Type': 'text/html' })
+            if (oauthCode) {
+              res.end('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Authentication successful! You can close this window.</h2></body></html>')
+              server.close()
+              resolve(oauthCode)
+            } else {
+              res.end('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Authentication failed: ' + (oauthError || 'unknown') + '</h2></body></html>')
+              server.close()
+              reject(new Error('OAuth error: ' + (oauthError || 'unknown')))
+            }
+          })
+          server.on('error', reject)
+          server.listen(8765, 'localhost', () => {
+            console.log('[Gmail OAuth] Callback server listening on port 8765')
+          })
+          setTimeout(() => { server.close(); reject(new Error('Authentication timed out after 5 minutes')) }, 300000)
+        })
+      } catch (err) {
+        database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+        return
+      }
+
+      // Exchange code for tokens
+      const tokenBody = [
+        'code='          + encodeURIComponent(code),
+        'client_id='     + encodeURIComponent(account.client_id),
+        'client_secret=' + encodeURIComponent(account.client_secret),
+        'redirect_uri='  + encodeURIComponent(REDIRECT_URI),
+        'grant_type=authorization_code',
+      ].join('&')
+
+      let tokenRes
+      try {
+        tokenRes = await new Promise((resolve, reject) => {
+          const options = {
+            hostname: 'oauth2.googleapis.com',
+            port: 443, path: '/token', method: 'POST',
+            headers: {
+              'Content-Type':   'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(tokenBody),
+            },
+          }
+          const req = https.request(options, (res) => {
+            let data = ''
+            res.on('data', chunk => data += chunk)
+            res.on('end', () => { try { resolve(JSON.parse(data)) } catch { reject(new Error('Invalid token response')) } })
+          })
+          req.on('error', reject)
+          req.write(tokenBody)
+          req.end()
+        })
+      } catch (err) {
+        database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+        return
+      }
+
+      if (tokenRes.error) {
+        database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+        return
+      }
+
+      // Try to get email from userinfo
+      let userEmail = ''
+      try {
+        const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
           headers: { 'Authorization': 'Bearer ' + tokenRes.access_token }
         })
-        const profileText = await profileRes.text()
-        console.log('[Gmail Auth] Profile raw response:', profileText)
-        const profile = JSON.parse(profileText)
-        userEmail = profile.emailAddress || ''
-        console.log('[Gmail Auth] Email from profile:', userEmail)
+        const userinfoText = await userinfoRes.text()
+        console.log('[Gmail Auth] Userinfo raw response:', userinfoText)
+        const userinfo = JSON.parse(userinfoText)
+        userEmail = userinfo.email || ''
+        console.log('[Gmail Auth] Email from userinfo:', userEmail)
       } catch(e) {
-        console.log('[Gmail Auth] Profile fetch failed:', e.message)
+        console.log('[Gmail Auth] Userinfo fetch failed:', e.message)
       }
-    }
 
-    // Fallback: decode id_token
-    if (!userEmail && tokenRes.id_token) {
-      try {
-        const parts = tokenRes.id_token.split('.')
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
-        userEmail = payload.email || ''
-        console.log('[Gmail Auth] Email from id_token:', userEmail)
-      } catch(e) {
-        console.log('[Gmail Auth] id_token decode failed:', e.message)
+      // Fallback: Gmail profile
+      if (!userEmail) {
+        try {
+          const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+            headers: { 'Authorization': 'Bearer ' + tokenRes.access_token }
+          })
+          const profileText = await profileRes.text()
+          console.log('[Gmail Auth] Profile raw response:', profileText)
+          const profile = JSON.parse(profileText)
+          userEmail = profile.emailAddress || ''
+          console.log('[Gmail Auth] Email from profile:', userEmail)
+        } catch(e) {
+          console.log('[Gmail Auth] Profile fetch failed:', e.message)
+        }
       }
-    }
 
-    console.log('[Gmail Auth] Final email:', userEmail)
+      // Fallback: decode id_token
+      if (!userEmail && tokenRes.id_token) {
+        try {
+          const parts = tokenRes.id_token.split('.')
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
+          userEmail = payload.email || ''
+          console.log('[Gmail Auth] Email from id_token:', userEmail)
+        } catch(e) {
+          console.log('[Gmail Auth] id_token decode failed:', e.message)
+        }
+      }
 
-    // Save to DB even if email is empty — we'll show a warning
-    database.prepare(
-      'UPDATE gmail_accounts SET access_token=?, refresh_token=?, token_expiry=?, status=?, email=? WHERE id=?'
-    ).run(
-      tokenRes.access_token,
-      tokenRes.refresh_token || null,
-      Date.now() + (tokenRes.expires_in || 3600) * 1000,
-      'authenticated',
-      userEmail,
-      accountId
-    )
+      console.log('[Gmail Auth] Final email:', userEmail)
 
-    console.log('[Gmail Auth] Saved account. Email:', userEmail || 'EMPTY - check logs above')
-    return { success: true, email: userEmail }
+      database.prepare(
+        'UPDATE gmail_accounts SET access_token=?, refresh_token=?, token_expiry=?, status=?, email=? WHERE id=?'
+      ).run(
+        tokenRes.access_token,
+        tokenRes.refresh_token || null,
+        Date.now() + (tokenRes.expires_in || 3600) * 1000,
+        'authenticated',
+        userEmail,
+        accountId
+      )
+
+      console.log('[Gmail Auth] Saved account. Email:', userEmail || 'EMPTY - check logs above')
+    })().catch(err => {
+      console.log('[Gmail Auth] Background auth error:', err.message)
+      database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
+    })
+
+    return { success: true, authUrl, accountId }
   })
 
   ipcMain.handle('gmail:removeAccount', async (_, accountId) => {
@@ -1324,8 +1328,8 @@ async function refreshGmailToken(account, database) {
         client_id:     account.client_id,
         client_secret: account.client_secret,
         refresh_token: account.refresh_token,
-        grant_type:    'refresh_token',
-      }).toString(),
+        grant_type:    'refresh_token'
+      }).toString()
     })
     const data = await res.json()
     if (data.access_token) {
@@ -1335,11 +1339,15 @@ async function refreshGmailToken(account, database) {
       account.access_token = data.access_token
       account.token_expiry = newExpiry
       console.log('[Gmail] Token refreshed for:', account.email)
+      return true
+    } else {
+      console.log('[Gmail] Token refresh failed:', account.email, data.error || 'no token')
+      return false
     }
   } catch(e) {
     console.log('[Gmail] Token refresh error:', e.message)
+    return false
   }
-  return account
 }
 
 async function sendViaGmailAPI(accessToken, mailOptions) {
@@ -1457,6 +1465,12 @@ async function processGmailBatch(campaignId, campaign, contacts, gmailAccounts, 
   const BATCH_DELAY = 150
   let sent = 0, failed = 0, tIdx = 0
 
+  const accountFailures = {}
+  const MAX_FAILURES = 2
+  function getAvailable(accounts, failures, max) {
+    return accounts.filter(a => (failures[a.id] || 0) < max)
+  }
+
   for (let i = 0; i < contacts.length; i++) {
     const state = runningCampaigns.get(campaignId)
     if (!state || state.cancelled) { console.log('[Gmail] Campaign cancelled'); break }
@@ -1472,30 +1486,53 @@ async function processGmailBatch(campaignId, campaign, contacts, gmailAccounts, 
 
     const html    = mergeTemplate(campaign.html_body, recipientData)
     const subject = mergeTemplate(campaign.subject,   recipientData)
-    const account = gmailAccounts[tIdx % gmailAccounts.length]
+    const available = getAvailable(gmailAccounts, accountFailures, MAX_FAILURES)
+    if (available.length === 0) { console.log('[Gmail] All accounts bad, stopping'); break }
+    const account = available[tIdx % available.length]
     tIdx++
 
-    try {
-      // Refresh token if expired or expiring within 60s
-      if (!account.token_expiry || Date.now() > account.token_expiry - 60000) {
-        await refreshGmailToken(account, database)
-      }
+    const mailOptions = {
+      from:    campaign.from_name ? `${campaign.from_name} <${account.email}>` : account.email,
+      to:      contact.email,
+      subject,
+      html,
+    }
+    if (preparedAttachments.length > 0) mailOptions.attachments = preparedAttachments
 
-      const mailOptions = {
-        from:    campaign.from_name ? `${campaign.from_name} <${account.email}>` : account.email,
-        to:      contact.email,
-        subject,
-        html,
+    try {
+      if (!account.token_expiry || Date.now() > account.token_expiry - 60000) {
+        const ok = await refreshGmailToken(account, database)
+        if (!ok) {
+          accountFailures[account.id] = MAX_FAILURES
+          i--
+          continue
+        }
       }
-      if (preparedAttachments.length > 0) mailOptions.attachments = preparedAttachments
       await sendViaGmailAPI(account.access_token, mailOptions)
       sent++
-      database.prepare('UPDATE campaigns SET sent_count=? WHERE id=?').run(sent, campaignId)
+      accountFailures[account.id] = 0
       console.log(`[Gmail] ✅ ${contact.email} via ${account.email}`)
-    } catch (err) {
-      failed++
-      database.prepare('UPDATE campaigns SET failed_count=? WHERE id=?').run(failed, campaignId)
-      console.log(`[Gmail] ❌ ${contact.email}: ${err.message}`)
+    } catch(err) {
+      accountFailures[account.id] = (accountFailures[account.id] || 0) + 1
+      console.log(`[Gmail] ❌ ${contact.email} via ${account.email}: ${err.message}`)
+      const retry = getAvailable(gmailAccounts, accountFailures, MAX_FAILURES)
+      if (retry.length > 0) {
+        const ra = retry[tIdx % retry.length]
+        tIdx++
+        try {
+          await sendViaGmailAPI(ra.access_token, mailOptions)
+          sent++
+          accountFailures[ra.id] = 0
+          console.log(`[Gmail] ✅ Retry OK: ${contact.email} via ${ra.email}`)
+        } catch(e2) {
+          failed++
+          accountFailures[ra.id] = (accountFailures[ra.id] || 0) + 1
+          database.prepare('UPDATE campaigns SET failed_count=? WHERE id=?').run(failed, campaignId)
+        }
+      } else {
+        failed++
+        database.prepare('UPDATE campaigns SET failed_count=? WHERE id=?').run(failed, campaignId)
+      }
     }
 
     BrowserWindow.getAllWindows().forEach(w => {

@@ -1579,6 +1579,10 @@ function GmailApiManager({ accounts, onRefresh, addToast }) {
   const [uploading,      setUploading]      = React.useState(false)
   const [authenticating, setAuthenticating] = React.useState(null)
   const [testing,        setTesting]        = React.useState(null)
+  const [authCard,       setAuthCard]       = React.useState(null) // { authUrl, accountId }
+  const pollRef                             = React.useRef(null)
+
+  React.useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const authenticated = accounts.filter(a => a.status === 'authenticated')
 
@@ -1621,19 +1625,36 @@ function GmailApiManager({ accounts, onRefresh, addToast }) {
   async function handleAuthenticate(accountId) {
     setAuthenticating(accountId)
     try {
-      addToast('Browser opening for Google sign-in...', 'success')
       const result = await window.api.gmail.authenticate(accountId)
-      if (result.success) {
-        addToast('Account authenticated: ' + result.email, 'success')
-      } else {
-        addToast('Authentication failed: ' + result.error, 'error')
+      if (!result.success) {
+        addToast('Failed to start auth: ' + result.error, 'error')
+        setAuthenticating(null)
+        return
       }
+      setAuthCard({ authUrl: result.authUrl, accountId })
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = setInterval(async () => {
+        try {
+          const updated = await window.api.gmail.getAccounts()
+          const acc = (updated || []).find(a => a.id === accountId)
+          if (acc && acc.status === 'authenticated') {
+            clearInterval(pollRef.current); pollRef.current = null
+            setAuthCard(null); setAuthenticating(null)
+            addToast('Authenticated: ' + acc.email, 'success')
+            onRefresh()
+          }
+        } catch {}
+      }, 3000)
     } catch (err) {
       addToast('Authentication error: ' + err.message, 'error')
-    } finally {
       setAuthenticating(null)
-      onRefresh()
     }
+  }
+
+  function handleCancelAuth() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    setAuthCard(null); setAuthenticating(null)
+    onRefresh()
   }
 
   async function handleTest(accountId) {
@@ -1684,6 +1705,32 @@ function GmailApiManager({ accounts, onRefresh, addToast }) {
           {uploading ? 'Uploading…' : '📁 Upload Credentials JSON'}
         </button>
       </div>
+
+      {/* OAuth URL card — shown after authenticate returns authUrl */}
+      {authCard && (
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--pu)', borderRadius: 'var(--rad-l)', padding: 18, marginBottom: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>🔐 Open this link in your browser to authenticate:</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+            <input readOnly value={authCard.authUrl} onClick={e => e.target.select()}
+              style={{ flex: 1, padding: '7px 10px', fontSize: 11, fontFamily: 'monospace', background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', color: 'var(--txt2)', minWidth: 0 }} />
+            <button onClick={() => navigator.clipboard.writeText(authCard.authUrl)}
+              style={{ padding: '7px 12px', background: 'var(--bg2)', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font)', color: 'var(--txt2)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+              📋 Copy Link
+            </button>
+            <button onClick={() => window.open(authCard.authUrl, '_blank')}
+              style={{ padding: '7px 12px', background: 'var(--pu)', color: '#fff', border: 'none', borderRadius: 'var(--rad)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+              🌐 Open in Browser
+            </button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 12, color: 'var(--txt3)' }}>⟳ Waiting for authentication...</div>
+            <button onClick={handleCancelAuth}
+              style={{ fontSize: 12, padding: '4px 10px', background: 'none', border: '1px solid var(--bdr)', borderRadius: 'var(--rad)', cursor: 'pointer', color: 'var(--txt2)', fontFamily: 'var(--font)' }}>
+              ✕ Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Account list or empty state */}
       {accounts.length === 0 ? (
