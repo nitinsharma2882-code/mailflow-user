@@ -1516,6 +1516,7 @@ async function processGmailBatch(campaignId, campaign, contacts, gmailAccounts, 
       }
       await sendViaGmailAPI(account.access_token, mailOptions)
       sent++
+      database.prepare('UPDATE campaigns SET sent_count=? WHERE id=?').run(sent, campaignId)
       accountFailures[account.id] = 0
       console.log(`[Gmail] ✅ ${contact.email} via ${account.email}`)
     } catch(err) {
@@ -1528,6 +1529,7 @@ async function processGmailBatch(campaignId, campaign, contacts, gmailAccounts, 
         try {
           await sendViaGmailAPI(ra.access_token, mailOptions)
           sent++
+          database.prepare('UPDATE campaigns SET sent_count=? WHERE id=?').run(sent, campaignId)
           accountFailures[ra.id] = 0
           console.log(`[Gmail] ✅ Retry OK: ${contact.email} via ${ra.email}`)
         } catch(e2) {
