@@ -1392,7 +1392,13 @@ async function sendViaGmailAPI(accessToken, mailOptions) {
   })
 
   const data = await res.json()
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
+  console.log('[Gmail API] Response status:', res.status, 'Message ID:', data.id || 'none', 'Error:', data.error ? JSON.stringify(data.error) : 'none')
+  if (!res.ok || data.error) {
+    throw new Error('Gmail API error ' + res.status + ': ' + (data.error ? (data.error.message || JSON.stringify(data.error)) : 'unknown'))
+  }
+  if (!data.id) {
+    throw new Error('Gmail API returned no message ID — message may not have been sent')
+  }
   return data
 }
 
