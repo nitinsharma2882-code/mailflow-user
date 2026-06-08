@@ -1584,6 +1584,13 @@ function GmailApiManager({ accounts, onRefresh, addToast }) {
 
   React.useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
+  React.useEffect(() => {
+    const unsub = window.api.gmail.onQuotaExceeded(({ email, error }) => {
+      addToast(`⚠️ Quota exceeded for ${email} — switching to next account`, 'warning')
+    })
+    return () => unsub()
+  }, [])
+
   const authenticated = accounts.filter(a => a.status === 'authenticated')
 
   async function handleUploadCredentials() {

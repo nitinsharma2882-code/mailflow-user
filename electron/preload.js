@@ -127,6 +127,11 @@ contextBridge.exposeInMainWorld('api', {
     testAccount:   (id)    => ipcRenderer.invoke('gmail:testAccount', id),
     sendCampaign:        (id)   => ipcRenderer.invoke('gmail:sendCampaign', id),
     sendCampaignForPage: (data) => ipcRenderer.invoke('gmail:sendCampaignForPage', data),
+    onQuotaExceeded: (cb) => {
+      const handler = (_, data) => cb(data)
+      ipcRenderer.on('gmail:quotaExceeded', handler)
+      return () => ipcRenderer.removeListener('gmail:quotaExceeded', handler)
+    },
   },
 
   // License

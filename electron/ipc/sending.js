@@ -652,6 +652,22 @@ function registerSendingHandlers() {
       )
 
       console.log('[Gmail Auth] Saved account. Email:', userEmail || 'EMPTY - check logs above')
+
+      try {
+        const testRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+          headers: { 'Authorization': 'Bearer ' + tokenRes.access_token }
+        })
+        const testData = await testRes.json()
+        if (testData.error) {
+          database.prepare('UPDATE gmail_accounts SET status=?, notes=? WHERE id=?')
+            .run('failed', 'API disabled: ' + (testData.error.message || testData.error.status), accountId)
+          console.log('[Gmail Auth] Account API check failed:', testData.error.message)
+          return
+        }
+        console.log('[Gmail Auth] Account verified OK:', testData.emailAddress)
+      } catch(e) {
+        console.log('[Gmail Auth] Verification check error:', e.message)
+      }
     })().catch(err => {
       console.log('[Gmail Auth] Background auth error:', err.message)
       database.prepare('UPDATE gmail_accounts SET status=? WHERE id=?').run('pending', accountId)
@@ -1393,8 +1409,16 @@ async function sendViaGmailAPI(accessToken, mailOptions) {
 
   const data = await res.json()
   console.log('[Gmail API] Response status:', res.status, 'Message ID:', data.id || 'none', 'Error:', data.error ? JSON.stringify(data.error) : 'none')
-  if (!res.ok || data.error) {
-    throw new Error('Gmail API error ' + res.status + ': ' + (data.error ? (data.error.message || JSON.stringify(data.error)) : 'unknown'))
+  if (data.error) {
+    const errMsg    = data.error.message || JSON.stringify(data.error)
+    const errStatus = data.error.status  || ''
+    if (errStatus === 'RESOURCE_EXHAUSTED' || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('rate limit')) {
+      throw new Error('QUOTA_EXCEEDED: ' + errMsg)
+    }
+    throw new Error('Gmail API error ' + res.status + ': ' + errMsg)
+  }
+  if (!res.ok) {
+    throw new Error('Gmail API error ' + res.status + ': unknown')
   }
   if (!data.id) {
     throw new Error('Gmail API returned no message ID — message may not have been sent')
@@ -1520,6 +1544,13 @@ async function processGmailBatch(campaignId, campaign, contacts, gmailAccounts, 
       accountFailures[account.id] = 0
       console.log(`[Gmail] ✅ ${contact.email} via ${account.email}`)
     } catch(err) {
+      if (err.message.startsWith('QUOTA_EXCEEDED:')) {
+        console.log(`[Gmail] ⚠️ Quota exceeded for ${account.email} — removing from pool for this campaign`)
+        accountFailures[account.id] = MAX_FAILURES
+        BrowserWindow.getAllWindows().forEach(w => {
+          try { w.webContents.send('gmail:quotaExceeded', { email: account.email, error: err.message }) } catch {}
+        })
+      }
       accountFailures[account.id] = (accountFailures[account.id] || 0) + 1
       console.log(`[Gmail] ❌ ${contact.email} via ${account.email}: ${err.message}`)
       const retry = getAvailable(gmailAccounts, accountFailures, MAX_FAILURES)
